@@ -43,24 +43,26 @@ struct MeetingChecks {
         precondition(japanese.paragraphs == ["今週のリリースは"])
         precondition(japanese.liveText == "厳しい")
 
-        // A long monologue closes on a sentence-ending final, not mid-sentence.
-        var long = TranscriptAssembler(language: .japanese)
-        let chunk = String(repeating: "あ", count: 70)
-        precondition(!long.acceptFinal(chunk + "、"))
-        precondition(!long.acceptFinal(chunk + "、もしあなた"), "Closed mid-sentence")
-        precondition(long.acceptFinal("が人事であれば。"))
-        precondition(long.paragraphs.count == 1 && long.paragraphs[0].hasSuffix("人事であれば。"))
-        // ...but never grows without bound.
+        // Continuous speech closes after a sentence or two, on a sentence end.
+        var monologue = TranscriptAssembler(language: .japanese)
+        precondition(!monologue.acceptFinal("今週のリリースは厳しいです。"), "Closed before a sentence or two")
+        precondition(!monologue.acceptFinal("検証環境のテストがまだ終わっていないので、もしあなた"), "Closed mid-sentence")
+        precondition(monologue.acceptFinal("が担当なら来週火曜にずらしますか。"))
+        precondition(monologue.paragraphs.count == 1 && monologue.paragraphs[0].hasSuffix("ずらしますか。"))
+        precondition(monologue.liveText.isEmpty)
+        // ...and run-on speech without a sentence end is still bounded.
         var runaway = TranscriptAssembler(language: .japanese)
-        precondition(!runaway.acceptFinal(String(repeating: "い", count: 239)))
+        precondition(!runaway.acceptFinal(String(repeating: "い", count: 119)))
         precondition(runaway.acceptFinal("い"))
+        var english = TranscriptAssembler(language: .english)
+        precondition(!english.acceptFinal("So the release slips."), "English closed too early")
 
         // Noise-floor single characters never become paragraphs.
         var noise = TranscriptAssembler(language: .japanese)
         noise.acceptFinal("あ")
         precondition(!noise.commitFinalized() && noise.paragraphs.isEmpty)
 
-        var english = TranscriptAssembler(language: .english)
+        english = TranscriptAssembler(language: .english)
         english.acceptFinal("So the release")
         english.acceptVolatile("slips to Tuesday")
         precondition(english.liveText == "So the release slips to Tuesday")

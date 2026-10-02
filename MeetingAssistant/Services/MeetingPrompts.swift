@@ -12,7 +12,8 @@ enum MeetingPrompts {
         - Output only the Chinese translation of TARGET. No notes, labels, quotes or romanization.
         - The transcript comes from live speech recognition: it may contain misrecognized words, missing punctuation and sentence fragments. Use CONTEXT (earlier segments, not to be translated) and the meeting background to recover what the speaker meant. Do not translate an obvious misrecognition literally, and do not add information that was not said.
         - Keep proper nouns, product names and terms consistent with the meeting background. Keep English technical terms that Chinese engineers normally leave untranslated (API, PR, RAG, ...).
-        - Preserve the speaker's tone and intent, including polite or indirect phrasing, in natural Chinese rather than word-for-word.
+        - Be concise, like a live interpreter: drop fillers (えーと, なんか, まあ, um, like), false starts, repetitions and self-corrections. Keep every piece of actual content: facts, numbers, names, requests, opinions and their reasons.
+        - Preserve the speaker's intent, including polite or indirect phrasing, in short natural Chinese rather than word-for-word.
         - If TARGET is only a filler or backchannel, output a short Chinese equivalent.
         - If TARGET ends with an unfinished sentence, end your translation after the last complete sentence. Do not translate the unfinished tail and do not add an ellipsis; the next segment will cover it. If TARGET has no complete sentence at all, translate it as is.
         - If the last CONTEXT segment ended with an unfinished sentence that TARGET continues, begin with the translation of that whole sentence, including its start from CONTEXT.

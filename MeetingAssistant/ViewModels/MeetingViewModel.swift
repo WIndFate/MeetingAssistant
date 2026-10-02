@@ -37,7 +37,9 @@ final class MeetingViewModel: ObservableObject {
     // re-renders the list, so streamed text is pushed at most ~16 times/s.
     private static let renderInterval: TimeInterval = 0.06
     private let translationContextCount = 3
-    private let hintParagraphLimit = 12
+    // Paragraphs are only a sentence or two; the character cap is what
+    // actually bounds the hint context.
+    private let hintParagraphLimit = 30
     private let hintCharacterLimit = 2400
     // The question usually follows the name; fire once the speaker pauses.
     private let callSettleDelay: Duration = .milliseconds(700)

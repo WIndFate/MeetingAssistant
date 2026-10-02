@@ -64,8 +64,10 @@ Put meeting background (agenda, glossary, facts you can state) in
 ## How paragraphs are formed
 
 SpeechTranscriber reports volatile text and then a final result per phrase.
-A paragraph closes when nobody has spoken for 1.2s, or when it is long and a
-phrase ends a sentence. Paragraph breaks therefore always fall on phrase
+A paragraph closes when nobody has spoken for 1.2s, or once it holds a
+sentence or two (about 40 Japanese / 120 English characters) and a phrase ends
+a sentence. Each paragraph is translated on its own, so translations arrive a
+sentence or two at a time and stay short. Breaks always fall on phrase
 boundaries; a long monologue is never cut mid-sentence by a timer.
 
 ## Checks

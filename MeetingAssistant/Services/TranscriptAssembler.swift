@@ -9,16 +9,21 @@ import Foundation
 ///
 /// Paragraphs close in two ways:
 /// - the owner calls `commitFinalized()` after the speaker goes quiet;
-/// - a final arrives while the paragraph is already long, and the paragraph
-///   ends a sentence (or is far too long). Closing only on a final keeps every
-///   cut on a phrase boundary, so a sentence is never split mid-word the way
-///   a fixed time window splits it.
+/// - a final arrives once the paragraph holds a sentence or two and ends a
+///   sentence (or has run far too long without one). Closing only on a final
+///   keeps every cut on a phrase boundary, so a sentence is never split
+///   mid-word the way a fixed time window splits it.
+///
+/// Paragraphs are deliberately short: each one is translated on its own, so
+/// a one-or-two-sentence paragraph gives a translation within seconds of the
+/// speaker finishing that sentence, and one the user can read at a glance.
 struct TranscriptAssembler {
     private(set) var paragraphs: [String] = []
     private(set) var finalizedPending = ""
     private(set) var volatileText = ""
 
-    private(set) var softParagraphLength = 120
+    private(set) var softParagraphLength = 40
+    private(set) var hardParagraphLength = 120
     private(set) var joiner = ""
 
     init(language: TranscriptionLanguage) {
@@ -27,8 +32,11 @@ struct TranscriptAssembler {
 
     /// Paragraphs already on screen are kept; only new text uses the rules.
     mutating func setLanguage(_ language: TranscriptionLanguage) {
-        // Japanese packs far more content per character than English.
-        softParagraphLength = language == .english ? 320 : 120
+        // About one or two sentences. Japanese packs far more content per
+        // character than English. The hard limit only bounds run-on speech
+        // that never produces a sentence ending.
+        softParagraphLength = language == .english ? 120 : 40
+        hardParagraphLength = softParagraphLength * 3
         joiner = language == .english ? " " : ""
     }
 
@@ -55,7 +63,7 @@ struct TranscriptAssembler {
         volatileText = ""
         let length = Self.meaningfulCharacterCount(finalizedPending)
         let endsSentence = finalizedPending.last.map { Self.sentenceEnders.contains($0) } ?? false
-        if (length >= softParagraphLength && endsSentence) || length >= softParagraphLength * 2 {
+        if (length >= softParagraphLength && endsSentence) || length >= hardParagraphLength {
             return commitFinalized()
         }
         return false
