@@ -43,19 +43,37 @@ struct MeetingChecks {
         precondition(japanese.paragraphs == ["今週のリリースは"])
         precondition(japanese.liveText == "厳しい")
 
-        // Continuous speech closes after a sentence or two, on a sentence end.
+        // Continuous speech: the recognizer keeps one growing volatile text.
+        // Paragraphs close at sentence ends without waiting for a final.
         var monologue = TranscriptAssembler(language: .japanese)
-        precondition(!monologue.acceptFinal("今週のリリースは厳しいです。"), "Closed before a sentence or two")
-        precondition(!monologue.acceptFinal("検証環境のテストがまだ終わっていないので、もしあなた"), "Closed mid-sentence")
-        precondition(monologue.acceptFinal("が担当なら来週火曜にずらしますか。"))
-        precondition(monologue.paragraphs.count == 1 && monologue.paragraphs[0].hasSuffix("ずらしますか。"))
-        precondition(monologue.liveText.isEmpty)
-        // ...and run-on speech without a sentence end is still bounded.
+        precondition(!monologue.acceptVolatile("今週のリリースは厳しいです。検証環境の"), "Closed before a sentence or two")
+        let first = "今週のリリースは厳しいです。検証環境のテストがまだ終わっていないので、来週にずらしたいと思います。"
+        precondition(monologue.acceptVolatile(first + "火曜"))
+        precondition(monologue.paragraphs == [first], "Unexpected cut: \(monologue.paragraphs)")
+        precondition(monologue.liveText == "火曜")
+        // Growing volatile text keeps the committed part out of the live line.
+        monologue.acceptVolatile(first + "火曜はどうですか")
+        precondition(monologue.liveText == "火曜はどうですか")
+        // A revision inside the committed part still strips at the sentence end.
+        monologue.acceptVolatile(first.replacingOccurrences(of: "終わっていない", with: "終わってない") + "火曜はどうですか")
+        precondition(monologue.liveText == "火曜はどうですか", "Revision leaked: \(monologue.liveText)")
+        // The final for the whole range contributes only the uncommitted rest.
+        monologue.acceptFinal(first + "火曜はどうですか。")
+        precondition(monologue.paragraphs == [first] && monologue.finalizedPending == "火曜はどうですか。")
+        precondition(monologue.commitFinalized() && monologue.paragraphs.count == 2)
+        // The next range starts clean.
+        monologue.acceptVolatile("はい")
+        precondition(monologue.liveText == "はい")
+
+        // Run-on speech without a sentence end is still bounded, at a clause mark.
         var runaway = TranscriptAssembler(language: .japanese)
-        precondition(!runaway.acceptFinal(String(repeating: "い", count: 119)))
-        precondition(runaway.acceptFinal("い"))
+        let clause = String(repeating: "い", count: 70) + "、"
+        precondition(!runaway.acceptVolatile(clause + String(repeating: "う", count: 40)))
+        precondition(runaway.acceptVolatile(clause + String(repeating: "う", count: 50)))
+        precondition(runaway.paragraphs == [clause] && runaway.liveText == String(repeating: "う", count: 50))
+
         var english = TranscriptAssembler(language: .english)
-        precondition(!english.acceptFinal("So the release slips."), "English closed too early")
+        precondition(!english.acceptVolatile("So the release slips."), "English closed too early")
 
         // Noise-floor single characters never become paragraphs.
         var noise = TranscriptAssembler(language: .japanese)

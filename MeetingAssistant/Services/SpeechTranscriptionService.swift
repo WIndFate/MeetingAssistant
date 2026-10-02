@@ -1,13 +1,21 @@
+import Accelerate
 import AVFoundation
 import Foundation
+import os
 import Speech
 
 /// System audio → Process Tap → SpeechAnalyzer → paragraphs.
 ///
-/// Paragraph rules live in `TranscriptAssembler`; this service only decides
-/// *when* the speaker went quiet: no recognizer update for `quietInterval`
-/// means the turn paused, so it asks the analyzer to finalize and closes the
-/// paragraph once the final arrives.
+/// Paragraph rules live in `TranscriptAssembler`, including mid-speech cuts
+/// at sentence ends. This service only decides *when* the speaker went quiet
+/// and then asks the analyzer to finalize, closing the paragraph once the
+/// final arrives.
+///
+/// A recognizer gap alone is not silence: under CPU load the analyzer can go
+/// over a second without an update while someone is still talking, which cut
+/// mid-sentence fragments in a real run. Quiet therefore also requires the
+/// audio itself to be quiet; a long gap closes regardless, so a very low
+/// meeting volume cannot keep the last sentence open forever.
 @MainActor
 final class SpeechTranscriptionService {
     var onStateChange: ((TranscriptionState) -> Void)?
@@ -15,7 +23,9 @@ final class SpeechTranscriptionService {
 
     private let audioQueue = DispatchQueue(label: "MeetingAssistant.Audio")
     private lazy var capture = ProcessTapAudioCaptureService(callbackQueue: audioQueue)
-    private let feedSlot = AudioFeedSlot()
+    // Internal (not private) so a headless harness can feed recorded audio.
+    let feedSlot = AudioFeedSlot()
+    let levelMeter = AudioLevelMeter()
     private var engine: SpeechAnalyzerEngine?
     private var assembler = TranscriptAssembler(language: .japanese)
     private var language: TranscriptionLanguage = .japanese
@@ -27,6 +37,10 @@ final class SpeechTranscriptionService {
 
     // Volatile results stream every few hundred ms while someone talks.
     private let quietInterval: Duration = .milliseconds(1200)
+    private let audioQuietSeconds: TimeInterval = 0.6
+    // A gap this long closes the paragraph even if the audio is not quiet.
+    private let forcedQuietGap: TimeInterval = 3.0
+    private var lastRecognizerUpdateAt = Date()
     // If the analyzer sends no final after a finalize request, close the
     // paragraph with what is already final; volatile text stays live.
     private let finalizeFallbackDelay: Duration = .milliseconds(1500)
@@ -40,7 +54,8 @@ final class SpeechTranscriptionService {
             try await ensureSpeechPermission()
             try await startEngine(language: language)
             try capture.start(
-                audioHandler: { [feedSlot] buffer in
+                audioHandler: { [feedSlot, levelMeter] buffer in
+                    levelMeter.record(buffer)
                     feedSlot.feed?.append(buffer)
                 },
                 failureHandler: { [weak self] error in
@@ -100,7 +115,7 @@ final class SpeechTranscriptionService {
 
     // MARK: - Engine
 
-    private func startEngine(language: TranscriptionLanguage) async throws {
+    func startEngine(language: TranscriptionLanguage) async throws {
         generation += 1
         let current = generation
         assembler.setLanguage(language)
@@ -135,6 +150,7 @@ final class SpeechTranscriptionService {
     }
 
     private func handle(_ update: SpeechAnalyzerEngine.Update) {
+        lastRecognizerUpdateAt = Date()
         if update.isFinal {
             assembler.acceptFinal(update.text)
             if awaitingQuietCommit, assembler.volatileText.isEmpty {
@@ -149,9 +165,9 @@ final class SpeechTranscriptionService {
         scheduleQuietCheck()
     }
 
-    private func scheduleQuietCheck() {
+    private func scheduleQuietCheck(after delay: Duration? = nil) {
         quietTask?.cancel()
-        let interval = quietInterval
+        let interval = delay ?? quietInterval
         quietTask = Task { [weak self] in
             try? await Task.sleep(for: interval)
             guard !Task.isCancelled else { return }
@@ -161,6 +177,12 @@ final class SpeechTranscriptionService {
 
     private func speakerWentQuiet() {
         guard assembler.hasPendingText else { return }
+        let gap = Date().timeIntervalSince(lastRecognizerUpdateAt)
+        if levelMeter.secondsSinceLoudAudio < audioQuietSeconds, gap < forcedQuietGap {
+            // Audio is still active: the recognizer is just lagging. Re-check.
+            scheduleQuietCheck(after: .milliseconds(300))
+            return
+        }
         if assembler.volatileText.isEmpty {
             closeQuietParagraph()
             return
@@ -211,5 +233,27 @@ final class SpeechTranscriptionService {
             SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
         }
         guard status == .authorized else { throw SpeechEngineError.speechDenied }
+    }
+}
+
+/// Tracks when the captured audio was last above the speech floor. Written
+/// on the audio queue, read on the main actor.
+final class AudioLevelMeter: @unchecked Sendable {
+    // ponytail: fixed floor; meeting audio at normal volume sits well above it
+    // while speaking. Make it adaptive if quiet calls never register as loud.
+    private static let speechRMS: Float = 0.005
+    private let lastLoud = OSAllocatedUnfairLock(initialState: Date.distantPast)
+
+    func record(_ buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+        var rms: Float = 0
+        vDSP_rmsqv(samples, 1, &rms, vDSP_Length(buffer.frameLength))
+        if rms >= Self.speechRMS {
+            lastLoud.withLock { $0 = Date() }
+        }
+    }
+
+    var secondsSinceLoudAudio: TimeInterval {
+        Date().timeIntervalSince(lastLoud.withLock { $0 })
     }
 }
