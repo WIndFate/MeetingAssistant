@@ -76,7 +76,7 @@ private struct MeetingTimelineView: View {
 
             GeometryReader { viewport in
                 FollowBottomScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         if viewModel.turns.isEmpty && visibleLiveText.isEmpty {
                             Text(viewModel.isListening ? "Waiting for speech..." : viewModel.statusText)
                                 .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -87,7 +87,7 @@ private struct MeetingTimelineView: View {
                             TurnView(turn: turn, width: viewport.size.width)
                         }
                         if !visibleLiveText.isEmpty {
-                            MessageBubble(role: "Speaker", text: visibleLiveText, style: .draft, width: viewport.size.width)
+                            MessageBubble(text: visibleLiveText, style: .draft, width: viewport.size.width)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -114,24 +114,29 @@ private struct TurnView: View {
     let width: CGFloat
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            MessageBubble(role: "Speaker", text: turn.text, style: .incoming, width: width) {
+        VStack(alignment: .leading, spacing: 6) {
+            MessageBubble(text: turn.text, style: .incoming, width: width) {
                 if turn.isTranslating || !turn.translation.isEmpty || turn.translationError != nil {
                     TranslationView(text: turn.translation, isLoading: turn.isTranslating, error: turn.translationError)
                 }
             }
             ForEach(Array(turn.archivedHints.enumerated()), id: \.offset) { _, hint in
-                MessageBubble(role: "Reply hint", text: hint, style: .hint(isStreaming: false), width: width)
+                hintBubble(hint)
             }
             if turn.isHintStreaming || !turn.hint.isEmpty {
-                MessageBubble(
-                    role: "Reply hint",
-                    text: turn.hint.isEmpty ? "Preparing reply hint..." : turn.hint,
-                    style: .hint(isStreaming: turn.isHintStreaming),
-                    width: width
-                )
+                hintBubble(turn.hint.isEmpty ? "正在生成回答提示…" : turn.hint)
             }
         }
-        .padding(.bottom, 4)
+    }
+
+    private func hintBubble(_ text: String) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text("回答提示")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 6)
+            MessageBubble(text: text, style: .hint, width: width)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }

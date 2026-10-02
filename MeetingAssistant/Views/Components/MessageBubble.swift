@@ -1,122 +1,117 @@
 import SwiftUI
 
-/// Speaker paragraphs sit on the left, reply hints on the right.
+/// Chat-style bubble (iMessage / LINE): speaker text on the left, reply
+/// hints on the right. Bubbles hug their content and grow with the window up
+/// to `maxWidthFraction` of it.
 struct MessageBubble<Accessory: View>: View {
     enum Style: Equatable {
         case incoming
         case draft
-        case hint(isStreaming: Bool)
+        case hint
     }
 
-    let role: String
     let text: String
     let style: Style
     let width: CGFloat
     @ViewBuilder var accessory: () -> Accessory
 
+    private let maxWidthFraction: CGFloat = 0.78
+
     init(
-        role: String,
         text: String,
         style: Style,
         width: CGFloat,
-        @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }
+        @ViewBuilder accessory: @escaping () -> Accessory
     ) {
-        self.role = role
         self.text = text
         self.style = style
         self.width = width
         self.accessory = accessory
     }
 
-    private var isTrailing: Bool {
-        if case .hint = style { return true }
-        return false
-    }
-
-    private var sideSpacer: CGFloat { width >= 500 ? 64 : 0 }
-    private var maxBubbleWidth: CGFloat { max(180, min(560, width - sideSpacer)) }
+    private var isTrailing: Bool { style == .hint }
 
     var body: some View {
-        HStack {
-            if isTrailing { Spacer(minLength: sideSpacer) }
-            VStack(alignment: isTrailing ? .trailing : .leading, spacing: 6) {
-                Text(role)
-                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                    .tracking(0.4)
-                    .foregroundStyle(.secondary.opacity(0.52))
-                    .textCase(.uppercase)
-                    .frame(maxWidth: .infinity, alignment: isTrailing ? .trailing : .leading)
+        HStack(spacing: 0) {
+            if isTrailing { Spacer(minLength: width * (1 - maxWidthFraction)) }
+            VStack(alignment: .leading, spacing: 0) {
                 Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .font(.system(size: 14, weight: .regular))
                     .lineSpacing(2)
-                    .foregroundStyle(.white.opacity(style == .draft ? 0.88 : 0.95))
+                    .foregroundStyle(foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 accessory()
             }
-            .frame(maxWidth: maxBubbleWidth, alignment: isTrailing ? .trailing : .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
-            )
-            if !isTrailing { Spacer(minLength: sideSpacer) }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .background(background, in: shape)
+            if !isTrailing { Spacer(minLength: width * (1 - maxWidthFraction)) }
         }
-        .frame(maxWidth: .infinity)
     }
 
-    private var background: AnyShapeStyle {
+    // The small corner on the speaker's side reads as the bubble's tail.
+    private var shape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 18,
+            bottomLeadingRadius: isTrailing ? 18 : 5,
+            bottomTrailingRadius: isTrailing ? 5 : 18,
+            topTrailingRadius: 18,
+            style: .continuous
+        )
+    }
+
+    private var background: Color {
         switch style {
-        case .incoming:
-            return AnyShapeStyle(Color.white.opacity(0.075))
-        case .draft:
-            return AnyShapeStyle(Color.white.opacity(0.055))
-        case .hint(let isStreaming):
-            return AnyShapeStyle(
-                isStreaming
-                    ? Color(red: 0.17, green: 0.22, blue: 0.26)
-                    : Color(red: 0.18, green: 0.23, blue: 0.27)
-            )
+        case .incoming: return Color(white: 0.22)
+        case .draft: return Color(white: 0.16)
+        case .hint: return Color(red: 0.04, green: 0.52, blue: 1.0)
+        }
+    }
+
+    private var foreground: Color {
+        switch style {
+        case .incoming: return .white.opacity(0.95)
+        case .draft: return .white.opacity(0.6)
+        case .hint: return .white
         }
     }
 }
 
+extension MessageBubble where Accessory == EmptyView {
+    init(text: String, style: Style, width: CGFloat) {
+        self.init(text: text, style: style, width: width) { EmptyView() }
+    }
+}
+
+/// Chinese translation shown inside the speaker bubble, under the original.
 struct TranslationView: View {
     let text: String
     let isLoading: Bool
     let error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label("中文", systemImage: "character.book.closed")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(Color(red: 0.59, green: 0.78, blue: 0.88).opacity(0.82))
-            if let error {
-                Text(error)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary.opacity(0.7))
-            } else if isLoading && text.isEmpty {
-                Text("Translating...")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary.opacity(0.74))
-            } else {
-                Text(text)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .lineSpacing(2)
-                    .foregroundStyle(Color(red: 0.78, green: 0.90, blue: 0.95).opacity(0.92))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        Text(displayText)
+            .font(.system(size: 13, weight: .regular))
+            .lineSpacing(2)
+            .foregroundStyle(error == nil && !text.isEmpty
+                ? Color(red: 0.62, green: 0.85, blue: 0.95)
+                : Color.white.opacity(0.45))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 7)
+            // An overlay hairline instead of a Divider: a Divider is flexible
+            // and would stretch every bubble to its maximum width.
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(height: 0.5)
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            Color(red: 0.18, green: 0.34, blue: 0.40).opacity(0.22),
-            in: RoundedRectangle(cornerRadius: 13, style: .continuous)
-        )
+            .padding(.top, 7)
+    }
+
+    private var displayText: String {
+        if let error { return error }
+        if isLoading && text.isEmpty { return "翻译中…" }
+        return text
     }
 }
 

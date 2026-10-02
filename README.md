@@ -64,11 +64,13 @@ Put meeting background (agenda, glossary, facts you can state) in
 ## How paragraphs are formed
 
 SpeechTranscriber reports volatile text and then a final result per phrase.
-A paragraph closes when nobody has spoken for 1.2s, or once it holds a
-sentence or two (about 40 Japanese / 120 English characters) and a phrase ends
-a sentence. Each paragraph is translated on its own, so translations arrive a
-sentence or two at a time and stay short. Breaks always fall on phrase
-boundaries; a long monologue is never cut mid-sentence by a timer.
+During continuous speech SpeechTranscriber keeps one growing volatile text
+and may not finalize it for a long time, so paragraphs are cut at the text
+level: as soon as the live text holds a sentence or two (about 40 Japanese /
+120 English characters), everything up to the last sentence end becomes a
+paragraph and is translated. A paragraph also closes when the speaker pauses
+(no recognizer update for 1.2s and the audio quiet for 0.6s). Breaks fall on
+sentence ends; a long monologue is never cut mid-sentence by a timer.
 
 ## Checks
 
