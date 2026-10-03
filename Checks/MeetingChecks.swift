@@ -171,9 +171,12 @@ struct MeetingChecks {
     static func checkEchoCancellationChoice() {
         let headphones: UInt32 = 0x6864_706E // 'hdpn'
         let speakers: UInt32 = 0x6973_706B   // 'ispk'
-        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBuiltIn, dataSource: speakers))
-        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBuiltIn, dataSource: headphones))
-        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBluetooth, dataSource: nil))
-        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeHDMI, dataSource: nil))
+        let builtIn = kAudioDeviceTransportTypeBuiltIn
+        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: builtIn, dataSource: speakers, uid: "BuiltInSpeakerDevice"))
+        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: builtIn, dataSource: headphones, uid: "BuiltInSpeakerDevice"))
+        // Apple silicon: the jack is a separate built-in device.
+        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: builtIn, dataSource: nil, uid: "BuiltInHeadphoneOutputDevice"))
+        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBluetooth, dataSource: nil, uid: nil))
+        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeHDMI, dataSource: nil, uid: nil))
     }
 }

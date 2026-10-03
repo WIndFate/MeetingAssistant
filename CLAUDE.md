@@ -47,15 +47,16 @@ scripts/check.sh                   纯逻辑检查脚本
 ## 4. 架构与数据流
 
 ```text
-系统音频
-  → ProcessTapAudioCaptureService（专用串行音频队列）
+系统音频（对方）                              麦克风（我，开麦时）
+  → ProcessTapAudioCaptureService               → MicrophoneCaptureService（外放时开语音处理）
+  （各自的专用串行音频队列，以下两路各一套，互不共享）
   → AudioFeed（音频队列内转换为 analyzer 格式）
   → SpeechAnalyzerEngine（volatile / final 结果，回到 MainActor）
   → SpeechTranscriptionService（判断停顿、请求 finalize）
   → TranscriptAssembler（段落规则，纯逻辑）
-  → MeetingViewModel
+  → MeetingViewModel（两路段落按关闭顺序合并成一条时间线，MeetingTurn.isMine 标记来源）
        ├─ 新段落 → MeetingPrompts + MeetingKnowledge → OpenAIChatClient → 中文翻译
-       └─ 点名命中（MeetingCallDetector）→ 等待停顿 → OpenAIChatClient → 回答提示
+       └─ 对方段落点名命中（MeetingCallDetector）→ 等待停顿 → OpenAIChatClient → 回答提示
   → Views（ContentView / MessageBubble / ToolbarView / SettingsView）
 ```
 
@@ -94,7 +95,6 @@ scripts/check.sh                   纯逻辑检查脚本
 - private aggregate device 在创建时必须一次性写入当前 system output 的 `MainSubDevice` / `SubDeviceList` 和完整 `TapList`（sub-tap UID 加 drift compensation）。禁止先创建空 aggregate 再挂 tap，否则可能只采到全零音频
 - 输入 `AudioBufferList` 只能在同步回调内复制为自有 `AVAudioPCMBuffer`；复制前必须先设置 `frameLength`（初始的 `mDataByteSize` 为 0，会把音频复制成全零）
 - 停止和失败清理的顺序固定为：`AudioDeviceStop` → `AudioDeviceDestroyIOProcID` → `AudioHardwareDestroyAggregateDevice` → `AudioHardwareDestroyProcessTap`。Start / Stop 重复调用不能残留 tap 或 aggregate device
-
 - 采集故障回调用 `captureGeneration` 过滤：被替换或已停止的 aggregate 的 device-alive 回调可能晚到，不能让它停掉新的采集
 - 麦克风开启了语音处理时，aggregate 改为只挂 tap、不挂输出设备（`anchorsToOutputDevice = false`）：语音处理会接管内置输出，挂在输出设备上的 aggregate 会整个停止回调。实测（macOS 26.6）只挂 tap 时能正常采到音频；关麦后恢复挂输出设备
 
@@ -119,7 +119,11 @@ scripts/check.sh                   纯逻辑检查脚本
 - 外放时（内置扬声器、HDMI/USB 等）开启 Apple 语音处理消除回声，other-audio ducking 固定为 `.min`。实测：不处理时扬声器回声被完整转写成"我"的话；开启后回声为 0 字，双讲时用户的话仍清楚。代价是会议声音被压低约 8 dB；默认 ducking 约 -30 dB，几乎静音，禁止使用；高级 ducking 没有改善
 - 戴耳机（内置耳机孔、蓝牙）时不开语音处理，直接录原始麦克风，会议音量不受影响
 - 语音处理的输入有多个声道，只取第 0 声道（处理后的人声）
-- 点名检测只看对方的段落；回答提示里用户自己的段落以 `[Me]` 开头
+- 点名检测只看对方的段落；回答提示里用户自己的段落以 `[Me]` 开头，提示挂在对方最新一段下面
+- 「我」的段落也会翻译成中文（同一条逐段翻译，便于在会议记录里回看），不另加调用
+- `SpeechTranscriptionService.start()` 用 `startRequest` 令牌：等待权限或模型期间用户停止了，启动流程在每次 await 后发现令牌变化就退出，不会再打开采集
+- 系统音频一侧停止或失败时，麦克风一起停（麦克风跟随收听）
+- 麦克风收到 `AVAudioEngineConfigurationChange`（会议 app 接管麦克风、插拔耳机等）时，等 0.5s 后重新判断是否需要回声消除并重启；5s 内再次变化才关闭麦克风并提示
 
 ## 7. LLM 与提示词规则
 

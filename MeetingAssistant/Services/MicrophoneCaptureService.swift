@@ -12,7 +12,7 @@ import CoreAudio
 ///
 /// `start` / `stop` are called from the main actor only; captured buffers are
 /// copied in the engine's tap and handed to `callbackQueue`.
-final class MicrophoneCaptureService: @unchecked Sendable {
+final class MicrophoneCaptureService {
     typealias AudioHandler = (AVAudioPCMBuffer) -> Void
     typealias FailureHandler = (Error) -> Void
 
@@ -20,8 +20,14 @@ final class MicrophoneCaptureService: @unchecked Sendable {
     private var engine: AVAudioEngine?
     private var configurationObserver: NSObjectProtocol?
 
-    // kIOAudioOutputPortSubTypeHeadphones ('hdpn'): the built-in jack.
+    // kIOAudioOutputPortSubTypeHeadphones ('hdpn'): the built-in jack on
+    // Macs that switch one built-in device between speakers and headphones.
     private static let headphonesDataSource: UInt32 = 0x6864_706E
+    // Apple silicon / T2 Macs expose the jack as its own built-in device.
+    private static let headphonesDeviceUIDMarker = "Headphone"
+    // kAudioUnitErr_FailedInitialization: voice processing refuses some
+    // input/output pairs, e.g. a Continuity or USB mic with built-in speakers.
+    private static let voiceProcessingInitializationFailed = -10875
 
     init(callbackQueue: DispatchQueue) {
         self.callbackQueue = callbackQueue
@@ -61,10 +67,16 @@ final class MicrophoneCaptureService: @unchecked Sendable {
                 format: format,
                 block: Self.copyingTap(into: mono, queue: callbackQueue, handler: audioHandler)
             )
-            // Voice processing runs input and output as one unit; touching the
-            // mixer gives the engine its output side.
+            // Gives the engine its output side: voice processing runs input
+            // and output as one unit, and with the raw mic it makes an output
+            // device change (headphones unplugged) post a configuration
+            // change, which restarts the mic with a fresh echo decision.
             _ = engine.mainMixerNode
-            try engine.start()
+            do {
+                try engine.start()
+            } catch let error as NSError where echoCancellation && error.code == Self.voiceProcessingInitializationFailed {
+                throw MicrophoneCaptureError.unsupportedDevices
+            }
             // Registered after start: enabling voice processing itself
             // reconfigures the device.
             configurationObserver = NotificationCenter.default.addObserver(
@@ -125,13 +137,15 @@ final class MicrophoneCaptureService: @unchecked Sendable {
         guard let device = readDefaultOutputDevice() else { return true }
         let transport = readUInt32(device, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal) ?? 0
         let dataSource = readUInt32(device, kAudioDevicePropertyDataSource, kAudioDevicePropertyScopeOutput)
-        return needsEchoCancellation(transportType: transport, dataSource: dataSource)
+        return needsEchoCancellation(transportType: transport, dataSource: dataSource, uid: readUID(device))
     }
 
-    static func needsEchoCancellation(transportType: UInt32, dataSource: UInt32?) -> Bool {
+    static func needsEchoCancellation(transportType: UInt32, dataSource: UInt32?, uid: String?) -> Bool {
         switch transportType {
         case kAudioDeviceTransportTypeBuiltIn:
-            return dataSource != headphonesDataSource
+            let isHeadphones = dataSource == headphonesDataSource
+                || uid?.contains(headphonesDeviceUIDMarker) == true
+            return !isHeadphones
         // ponytail: Bluetooth output is assumed to be headphones; a Bluetooth
         // speaker would echo. USB headsets get voice processing they do not
         // need. Make it a setting if either shows up in practice.
@@ -149,6 +163,20 @@ final class MicrophoneCaptureService: @unchecked Sendable {
             kAudioObjectPropertyScopeGlobal
         )
         return device.flatMap { $0 == kAudioObjectUnknown ? nil : $0 }
+    }
+
+    private static func readUID(_ device: AudioObjectID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uid: CFString?
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        let status = withUnsafeMutablePointer(to: &uid) {
+            AudioObjectGetPropertyData(device, &address, 0, nil, &size, $0)
+        }
+        return status == noErr ? uid as String? : nil
     }
 
     private static func readUInt32(
@@ -172,6 +200,7 @@ final class MicrophoneCaptureService: @unchecked Sendable {
 enum MicrophoneCaptureError: LocalizedError {
     case permissionDenied
     case noInput
+    case unsupportedDevices
     case deviceChanged
 
     var errorDescription: String? {
@@ -180,8 +209,10 @@ enum MicrophoneCaptureError: LocalizedError {
             return "Microphone permission denied. Enable Meeting Assistant in System Settings > Privacy & Security > Microphone."
         case .noInput:
             return "No microphone input is available."
+        case .unsupportedDevices:
+            return "Echo cancellation cannot run with this microphone and speaker. Use the built-in microphone, or wear headphones."
         case .deviceChanged:
-            return "The microphone or speaker changed. Turn the microphone on again."
+            return "The microphone or speaker kept changing, so the microphone was turned off. Turn it on again once the devices settle."
         }
     }
 }

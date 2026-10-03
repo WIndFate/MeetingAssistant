@@ -45,6 +45,7 @@ final class MeetingViewModel: ObservableObject {
     // ponytail: a meeting spans until Clear; split on long idle if one record ever covers two meetings.
     private var record: MeetingRecord?
     private var historySaveTask: Task<Void, Never>?
+    private var lastMicRestart = Date.distantPast
 
     private static let languageKey = "MeetingAssistant.Language"
     // Tokens stream far faster than the eye reads; every turns mutation
@@ -67,6 +68,10 @@ final class MeetingViewModel: ObservableObject {
     // continuously, so a debounce could postpone the write indefinitely.
     // At most this much is lost if the app crashes.
     private let historySaveInterval: Duration = .seconds(5)
+    // A device change restarts the mic once it settles; a second change
+    // within the cooldown means the device is unusable, so the mic turns off.
+    private let micRestartDelay: Duration = .milliseconds(500)
+    private let micRestartCooldown: TimeInterval = 5
 
     init(settings: SettingsViewModel? = nil) {
         self.settings = settings ?? SettingsViewModel()
@@ -87,10 +92,13 @@ final class MeetingViewModel: ObservableObject {
             myTranscription.stop()
             transcription.stop()
         } else {
+            clearMicrophoneError()
             configureCaptureForMicrophone()
             Task {
                 await transcription.start(language: language)
                 if isMicEnabled, isListening {
+                    // The mic may have been switched on during the start.
+                    configureCaptureForMicrophone()
                     await myTranscription.start(language: language)
                 }
             }
@@ -101,6 +109,7 @@ final class MeetingViewModel: ObservableObject {
     /// the next start does.
     func toggleMicrophone() {
         isMicEnabled.toggle()
+        clearMicrophoneError()
         guard isListening else { return }
         if isMicEnabled {
             configureCaptureForMicrophone()
@@ -187,7 +196,11 @@ final class MeetingViewModel: ObservableObject {
     // MARK: - Transcription
 
     private func accept(_ state: TranscriptionState) {
-        if isListening != state.isListening { isListening = state.isListening }
+        if isListening != state.isListening {
+            isListening = state.isListening
+            // Also when the system side fails: the mic follows listening.
+            if !state.isListening { myTranscription.stop() }
+        }
         if statusText != state.statusText { statusText = state.statusText }
         syncError()
         if live.text != state.partialTranscript { live.text = state.partialTranscript }
@@ -204,11 +217,37 @@ final class MeetingViewModel: ObservableObject {
         if live.mine != state.partialTranscript { live.mine = state.partialTranscript }
         syncError()
         appendTurns(from: state.paragraphs, count: &micParagraphCount, isMine: true)
-        // A failed mic (permission, device change) turns itself off.
-        if isMicEnabled, !state.isListening, state.lastError != nil {
+        guard isMicEnabled, !state.isListening, state.lastError != nil else { return }
+        if case MicrophoneCaptureError.deviceChanged? = myTranscription.lastFailure,
+           Date().timeIntervalSince(lastMicRestart) > micRestartCooldown {
+            restartMicrophone()
+        } else {
+            // Permission denied, no input, or a device that keeps changing.
             isMicEnabled = false
             configureCaptureForMicrophone()
         }
+    }
+
+    /// Call apps reconfigure the mic when they join or unmute, and plugging in
+    /// headphones changes whether echo cancellation is needed: let the device
+    /// settle, then start again with a fresh decision.
+    private func restartMicrophone() {
+        lastMicRestart = Date()
+        myTranscription.clearError()
+        syncError()
+        let delay = micRestartDelay
+        Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self, self.isMicEnabled, self.isListening else { return }
+            print("[MeetingViewModel] microphone restart reason=device_changed")
+            self.configureCaptureForMicrophone()
+            await self.myTranscription.start(language: self.language)
+        }
+    }
+
+    private func clearMicrophoneError() {
+        myTranscription.clearError()
+        syncError()
     }
 
     /// Paragraphs from both sources join one timeline in the order they close.
@@ -328,8 +367,8 @@ final class MeetingViewModel: ObservableObject {
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
             characterLimit: hintCharacterLimit
         )
-        // The hint attaches to the latest paragraph.
-        let index = turns.count - 1
+        // The hint answers the other side, so it hangs under their latest turn.
+        let index = turns.lastIndex(where: { !$0.isMine }) ?? turns.count - 1
         if !turns[index].hint.isEmpty {
             turns[index].archivedHints.append(turns[index].hint)
             turns[index].hint = ""

@@ -48,6 +48,11 @@ final class SpeechTranscriptionService {
     // device-alive callback can still arrive afterwards and must not stop
     // the capture that replaced it.
     private var captureGeneration = 0
+    // Bumped by start, stop and fail: a start still awaiting permission or
+    // the speech model must not open the capture after the user stopped.
+    private var startRequest = 0
+    /// Why the last run stopped, for callers that react to specific errors.
+    private(set) var lastFailure: Error?
 
     private var quietTask: Task<Void, Never>?
     private var finalizeFallbackTask: Task<Void, Never>?
@@ -72,17 +77,21 @@ final class SpeechTranscriptionService {
 
     func start(language: TranscriptionLanguage) async {
         guard !state.isListening else { return }
+        startRequest += 1
+        let request = startRequest
         self.language = language
-        state.lastError = nil
+        clearError()
         setStatus("Starting...")
         do {
             try await ensureSpeechPermission()
+            guard startRequest == request else { return }
             if source == .microphone {
-                guard await AVAudioApplication.requestRecordPermission() else {
-                    throw MicrophoneCaptureError.permissionDenied
-                }
+                let granted = await AVAudioApplication.requestRecordPermission()
+                guard startRequest == request else { return }
+                guard granted else { throw MicrophoneCaptureError.permissionDenied }
             }
             try await startEngine(language: language)
+            guard startRequest == request else { return }
             try startCapture()
             state.isListening = true
             setStatus("Listening (\(language.shortTitle)).")
@@ -92,6 +101,7 @@ final class SpeechTranscriptionService {
     }
 
     func stop() {
+        startRequest += 1
         stopCapture()
         stopEngine()
         assembler.flushAll()
@@ -291,7 +301,14 @@ final class SpeechTranscriptionService {
         onStateChange?(state)
     }
 
+    func clearError() {
+        lastFailure = nil
+        state.lastError = nil
+    }
+
     private func fail(_ error: Error) {
+        startRequest += 1
+        lastFailure = error
         stopCapture()
         stopEngine()
         assembler.flushAll()

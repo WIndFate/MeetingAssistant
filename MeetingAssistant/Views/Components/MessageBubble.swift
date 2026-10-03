@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Chat-style bubble (iMessage / LINE): other participants on the left, the
-/// user's own words (green) and reply hints (blue) on the right. Bubbles hug their content and grow with the window up
-/// to `maxWidthFraction` of it.
+/// user's own words (green) and reply hints (blue) on the right. Bubbles hug
+/// their content and grow with the window up to `maxWidthFraction` of it.
 struct MessageBubble<Accessory: View>: View {
     enum Style: Equatable {
         case incoming
