@@ -146,6 +146,8 @@ scripts/check.sh                   纯逻辑检查脚本
 - 采用简洁口译风格：去掉口头禅、重复和说错重来，保留全部实质内容（事实、数字、人名、请求、观点和理由）
 - 末尾的半句不翻，由下一段补齐整句。翻译完成后用 `MeetingTranslationCleanup` 去掉"完整句之后、以省略号结尾的残句"
 - partial（实时行）不做翻译
+- user message 最后一行固定为「Translate TARGET into Simplified Chinese.」：以原文结尾时，模型偶尔会输出整理过的原文（实测出现过把日语去掉口头禅后原样返回）
+- `MeetingTranslationCleanup.isUntranslated` 检查输出是否主要是源语言（日语看假名占比 ≥ 30%，英语看拉丁字母占比 ≥ 50%），是则同一请求重试一次。这是失败重发，不是新增一类 LLM 调用
 
 ### 7.4 回答提示
 

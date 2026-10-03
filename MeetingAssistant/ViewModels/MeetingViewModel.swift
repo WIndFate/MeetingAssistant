@@ -289,22 +289,31 @@ final class MeetingViewModel: ObservableObject {
         let user = MeetingPrompts.translationUser(text: turn.text, context: context, language: language)
         turns[index].isTranslating = true
 
+        let source = language
         translationTasks[turn.id] = Task { [weak self] in
             guard let self else { return }
             do {
                 var text = ""
-                var lastRender = Date.distantPast
-                for try await delta in try self.client().stream(
-                    model: self.settings.translationModel,
-                    system: system,
-                    user: user,
-                    maxTokens: 800,
-                    temperature: 0.2
-                ) {
-                    text += delta
-                    guard Date().timeIntervalSince(lastRender) >= Self.renderInterval else { continue }
-                    lastRender = Date()
-                    self.updateTurn(turn.id) { $0.translation = text; $0.isTranslating = false }
+                // The model occasionally returns a tidied-up copy of the
+                // source instead of Chinese; that one gets a single retry.
+                for attempt in 1...2 {
+                    text = ""
+                    var lastRender = Date.distantPast
+                    for try await delta in try self.client().stream(
+                        model: self.settings.translationModel,
+                        system: system,
+                        user: user,
+                        maxTokens: 800,
+                        temperature: 0.2
+                    ) {
+                        text += delta
+                        guard Date().timeIntervalSince(lastRender) >= Self.renderInterval else { continue }
+                        lastRender = Date()
+                        self.updateTurn(turn.id) { $0.translation = text; $0.isTranslating = false }
+                    }
+                    guard attempt == 1, MeetingTranslationCleanup.isUntranslated(text, source: source) else { break }
+                    print("[MeetingViewModel] translation retry reason=source_language_output")
+                    self.updateTurn(turn.id) { $0.translation = ""; $0.isTranslating = true }
                 }
                 self.updateTurn(turn.id) {
                     $0.translation = MeetingTranslationCleanup.trimmingDanglingTail(text)

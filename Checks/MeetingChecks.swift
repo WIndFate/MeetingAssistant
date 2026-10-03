@@ -31,6 +31,16 @@ struct MeetingChecks {
         precondition(MeetingTranslationCleanup.trimmingDanglingTail("下周发布。如果...") == "下周发布。")
         precondition(MeetingTranslationCleanup.trimmingDanglingTail("要是你……") == "要是你……")
         precondition(MeetingTranslationCleanup.trimmingDanglingTail("好的，谢谢。") == "好的，谢谢。")
+
+        // A tidied-up Japanese copy (seen in a real meeting) is not a translation.
+        let japaneseCopy = "こちらのサーバー側で実行される部分をバックエンドと言います。また別の用語としては、前に登場しましたけど、フロントエンドのことをクライアントサイドと呼ぶこともあります。"
+        precondition(MeetingTranslationCleanup.isUntranslated(japaneseCopy, source: .japanese))
+        precondition(!MeetingTranslationCleanup.isUntranslated("在服务器端运行的部分叫后端，前端也叫客户端。", source: .japanese))
+        precondition(!MeetingTranslationCleanup.isUntranslated("用 API 调用，然后提 PR。", source: .japanese))
+        precondition(!MeetingTranslationCleanup.isUntranslated("登录页面（ログイン画面）有问题，昨天已经合并修复版本并部署。", source: .japanese))
+        precondition(MeetingTranslationCleanup.isUntranslated("So the release slips to Tuesday.", source: .english))
+        precondition(!MeetingTranslationCleanup.isUntranslated("所以发布推迟到周二，API 不变。", source: .english))
+        precondition(!MeetingTranslationCleanup.isUntranslated("", source: .japanese))
     }
 
     static func checkTranscriptAssembler() {
@@ -117,7 +127,7 @@ struct MeetingChecks {
         precondition(MeetingPrompts.hintSystem(knowledge).contains("对方在问"))
 
         let user = MeetingPrompts.translationUser(text: "来週です", context: ["前の話", " "], language: .japanese)
-        precondition(user == "Source language: Japanese\nCONTEXT:\n前の話\nTARGET:\n来週です")
+        precondition(user == "Source language: Japanese\nCONTEXT:\n前の話\nTARGET:\n来週です\nTranslate TARGET into Simplified Chinese.")
         let hint = MeetingPrompts.hintUser(transcript: ["一つ目", "セキさん、どう？"], language: .japanese, userName: "セキさん")
         precondition(hint.contains("addressed as: セキさん") && hint.hasSuffix("- セキさん、どう？"))
 
