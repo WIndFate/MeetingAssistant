@@ -13,7 +13,7 @@ Meeting Assistant 是一个原生 macOS 浮动面板应用，在线上会议中�
 ### 明确不做
 
 - 不引入后端进程、额外的语音模型（Whisper 等）或任何第三方依赖
-- 不做说话人分离、会议录音存档、会议纪要生成
+- 不做说话人分离、录音音频存档、会议纪要生成（文字记录的本地历史属于转写和翻译的直接延伸，见第 10 节）
 - 不增加额外的 LLM 调用（意图分类、转写纠错、路由、复核等）
 
 新增功能前先判断是否属于上述三项能力的直接延伸；如果不是，先与用户确认。
@@ -34,10 +34,10 @@ MeetingAssistant.xcodeproj/        Xcode 工程；MeetingAssistant/ 是文件系
 Config/Info.plist                  app 元数据与权限说明（不放在同步组内，避免被当作资源复制）
 MeetingAssistant/
   App/                             启动入口、AppDelegate（浮动面板、全局快捷键、隐身）、NonActivatingFloatingPanel
-  Models/                          值类型：TranscriptionLanguage、TranscriptionState、MeetingTurn
+  Models/                          值类型：TranscriptionLanguage、TranscriptionState、MeetingTurn、MeetingRecord（历史记录）
   Services/                        音频采集、转写、段落组装、提示词、知识库、OpenAI、Keychain、点名检测
-  ViewModels/                      MeetingViewModel（UI 唯一业务入口）、SettingsViewModel
-  Views/                           ContentView 与 Components/
+  ViewModels/                      MeetingViewModel（面板唯一业务入口）、SettingsViewModel、HistoryViewModel（历史窗口）
+  Views/                           ContentView、HistoryView 与 Components/
 Checks/MeetingChecks.swift         纯逻辑检查（不属于 app target），由 scripts/check.sh 编译运行
 knowledge/                         会议背景资料（运行时读取）
 scripts/check.sh                   纯逻辑检查脚本
@@ -161,11 +161,15 @@ scripts/check.sh                   纯逻辑检查脚本
 - 滚动容器外的条件性元素（如生成中的 `ProgressView`）必须常驻布局、用 opacity 隐藏；条件插入会改变容器高度，导致贴底失效
 - partial 文本由独立的 `LiveTranscript` 对象驱动，避免每次 partial 更新都重绘整个列表
 - 面板是 non-activating 的，点击不会抢走会议 app 的焦点；隐身默认开启（`sharingType = .none`，属于尽力而为）
+- 「会议记录」历史窗口是普通窗口（主动打开时可以获得焦点），左侧按日期分组、可搜索原文和翻译，右侧复用面板的气泡组件；隐身设置同样作用于它
 
 ## 10. 安全与隐私
 
 - API key 只存 Keychain；开发时可以用 scheme 环境变量 `OPENAI_API_KEY`。不得写入文件、UserDefaults、日志或提交到仓库。`scripts/check.sh` 会扫描已跟踪文件中的 `sk-...`；scheme 是共享文件，不要把填了 key 的 scheme 提交上去
-- 转写和翻译内容只保存在内存中，不落盘；"复制"功能只在用户主动操作时写入剪贴板
+- 会议文字记录（原文、翻译、回答提示）由 `MeetingHistoryStore` 保存在 `~/Library/Application Support/MeetingAssistant/History/`，每场会议一个 JSON 文件。该目录在仓库之外，**禁止把记录写进仓库目录**
+- 一场会议从"启动或清空后的第一段"开始，到下一次清空或退出时结束；进行中最多每 5 秒保存一次（节流而不是防抖，持续讲话时防抖会一直推迟写入），清空、退出和打开历史窗口时立即保存
+- 删除记录一律移到废纸篓，不直接删除；不保存音频
+- "复制"功能只在用户主动操作时写入剪贴板
 - `knowledge/` 中真实的会议资料可能涉及保密信息，提交前要确认是否适合进入仓库
 
 ## 11. 验证要求

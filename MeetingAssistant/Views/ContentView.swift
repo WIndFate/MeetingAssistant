@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var viewModel: MeetingViewModel
     @ObservedObject var settings: SettingsViewModel
+    let onOpenHistory: () -> Void
     @State private var isSettingsPresented = false
 
     var body: some View {
@@ -15,6 +16,7 @@ struct ContentView: View {
             ToolbarView(
                 viewModel: viewModel,
                 onOpenSettings: { isSettingsPresented = true },
+                onOpenHistory: onOpenHistory,
                 onCopy: copyTranscript
             )
             .popover(isPresented: $isSettingsPresented, arrowEdge: .bottom) {
@@ -121,22 +123,11 @@ private struct TurnView: View {
                 }
             }
             ForEach(Array(turn.archivedHints.enumerated()), id: \.offset) { _, hint in
-                hintBubble(hint)
+                HintBubble(text: hint, width: width)
             }
             if turn.isHintStreaming || !turn.hint.isEmpty {
-                hintBubble(turn.hint.isEmpty ? "正在生成回答提示…" : turn.hint)
+                HintBubble(text: turn.hint.isEmpty ? "正在生成回答提示…" : turn.hint, width: width)
             }
         }
-    }
-
-    private func hintBubble(_ text: String) -> some View {
-        VStack(alignment: .trailing, spacing: 3) {
-            Text("回答提示")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
-                .padding(.trailing, 6)
-            MessageBubble(text: text, style: .hint, width: width)
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }

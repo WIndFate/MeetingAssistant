@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolbarView: View {
     @ObservedObject var viewModel: MeetingViewModel
     let onOpenSettings: () -> Void
+    let onOpenHistory: () -> Void
     let onCopy: () -> Void
 
     var body: some View {
@@ -55,7 +56,8 @@ struct ToolbarView: View {
 
             Spacer(minLength: 0)
 
-            ToolbarIconButton(systemImage: "trash", isHighlighted: false, help: "Clear transcript", action: viewModel.clear)
+            ToolbarIconButton(systemImage: "clock.arrow.circlepath", isHighlighted: false, help: "Meeting history (⌘Y)", action: onOpenHistory)
+            ToolbarIconButton(systemImage: "trash", isHighlighted: false, help: "Clear and start a new meeting (saved to history)", action: viewModel.clear)
             ToolbarIconButton(systemImage: "doc.on.doc", isHighlighted: false, help: "Copy transcript", action: onCopy)
             ToolbarIconButton(systemImage: "gearshape", isHighlighted: false, help: "Settings", action: onOpenSettings)
         }

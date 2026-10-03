@@ -83,6 +83,23 @@ extension MessageBubble where Accessory == EmptyView {
     }
 }
 
+/// Reply hint: a right-aligned blue bubble with a small caption.
+struct HintBubble: View {
+    let text: String
+    let width: CGFloat
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text("回答提示")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 6)
+            MessageBubble(text: text, style: .hint, width: width)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
+
 /// Chinese translation shown inside the speaker bubble, under the original.
 struct TranslationView: View {
     let text: String

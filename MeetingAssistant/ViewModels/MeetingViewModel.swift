@@ -12,7 +12,9 @@ final class LiveTranscript: ObservableObject {
 /// and reply hints when the user is addressed by name.
 @MainActor
 final class MeetingViewModel: ObservableObject {
-    @Published private(set) var turns: [MeetingTurn] = []
+    @Published private(set) var turns: [MeetingTurn] = [] {
+        didSet { scheduleHistorySave() }
+    }
     @Published private(set) var isListening = false
     @Published private(set) var statusText = "Idle."
     @Published private(set) var lastError: String?
@@ -31,6 +33,11 @@ final class MeetingViewModel: ObservableObject {
     private var callCheckTask: Task<Void, Never>?
     private var shortCallGraceIndex: Int?
     private var callAlertTask: Task<Void, Never>?
+    // The meeting being recorded: starts with the first paragraph after
+    // launch or Clear, ends at the next Clear or quit.
+    // ponytail: a meeting spans until Clear; split on long idle if one record ever covers two meetings.
+    private var record: MeetingRecord?
+    private var historySaveTask: Task<Void, Never>?
 
     private static let languageKey = "MeetingAssistant.Language"
     // Tokens stream far faster than the eye reads; every turns mutation
@@ -49,6 +56,10 @@ final class MeetingViewModel: ObservableObject {
     // before the actual question; give the rest a moment to arrive.
     private let shortCallParagraphLength = 10
     private let shortCallGraceDelay: Duration = .milliseconds(1500)
+    // Saves are throttled, not debounced: a busy meeting streams changes
+    // continuously, so a debounce could postpone the write indefinitely.
+    // At most this much is lost if the app crashes.
+    private let historySaveInterval: Duration = .seconds(5)
 
     init(settings: SettingsViewModel? = nil) {
         self.settings = settings ?? SettingsViewModel()
@@ -84,7 +95,11 @@ final class MeetingViewModel: ObservableObject {
         isStealthEnabled.toggle()
     }
 
+    /// Clear ends the current meeting: it is saved, and the next paragraph
+    /// starts a new record.
     func clear() {
+        saveHistoryNow()
+        record = nil
         translationTasks.values.forEach { $0.cancel() }
         translationTasks = [:]
         hintTask?.cancel()
@@ -109,14 +124,22 @@ final class MeetingViewModel: ObservableObject {
     }
 
     var transcriptText: String {
-        turns.map { turn in
-            var lines = ["Speaker: \(turn.text)"]
-            if !turn.translation.isEmpty { lines.append("中文: \(turn.translation)") }
-            lines += turn.archivedHints.map { "Hint: \($0)" }
-            if !turn.hint.isEmpty { lines.append("Hint: \(turn.hint)") }
-            return lines.joined(separator: "\n")
+        MeetingRecord.plainText(MeetingRecord.entries(from: turns))
+    }
+
+    /// Writes the current meeting to disk now (Clear, quit, opening history).
+    func saveHistoryNow() {
+        historySaveTask?.cancel()
+        historySaveTask = nil
+        guard var record, !turns.isEmpty else { return }
+        record.endedAt = Date()
+        record.entries = MeetingRecord.entries(from: turns)
+        self.record = record
+        do {
+            try MeetingHistoryStore.save(record, in: MeetingHistoryStore.defaultFolder)
+        } catch {
+            print("[MeetingViewModel] history save failed error=\(error.localizedDescription)")
         }
-        .joined(separator: "\n\n")
     }
 
     var isAnyHintStreaming: Bool {
@@ -284,6 +307,23 @@ final class MeetingViewModel: ObservableObject {
             }
             self.updateTurn(turnID) { $0.isHintStreaming = false }
             self.clearCallAlert()
+        }
+    }
+
+    // MARK: - History
+
+    private func scheduleHistorySave() {
+        guard !turns.isEmpty else { return }
+        if record == nil {
+            let now = Date()
+            record = MeetingRecord(id: UUID(), startedAt: now, endedAt: now, entries: [])
+        }
+        guard historySaveTask == nil else { return }
+        let interval = historySaveInterval
+        historySaveTask = Task { [weak self] in
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            self?.saveHistoryNow()
         }
     }
 

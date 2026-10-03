@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let viewModel = MeetingViewModel()
+    private let history = HistoryViewModel()
+    private var historyWindow: NSWindow?
 
     private let hintHotKey = GlobalHotKeyService()
     private var panel: NonActivatingFloatingPanel?
@@ -20,10 +22,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        viewModel.saveHistoryNow()
+    }
+
+    /// A regular window: browsing history is deliberate, so it may take focus.
+    func showHistory() {
+        // Include the meeting in progress, up to this moment.
+        viewModel.saveHistoryNow()
+        history.reload()
+        if historyWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "会议记录"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: HistoryView(viewModel: history))
+            window.center()
+            window.setFrameAutosaveName("MeetingHistory")
+            historyWindow = window
+            applyStealth()
+        }
+        NSApp.activate()
+        historyWindow?.makeKeyAndOrderFront(nil)
+    }
+
     private func installPanel() {
         // ignoresSafeArea: let SwiftUI draw into the hidden title bar strip.
         let hosting = NSHostingView(
-            rootView: ContentView(viewModel: viewModel, settings: viewModel.settings)
+            rootView: ContentView(
+                viewModel: viewModel,
+                settings: viewModel.settings,
+                onOpenHistory: { [weak self] in self?.showHistory() }
+            )
                 .ignoresSafeArea(.all)
                 .frame(minWidth: defaultPanelSize.width, minHeight: defaultPanelSize.height)
         )
@@ -60,9 +94,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Best-effort hide from screen sharing; modern ScreenCaptureKit-based
         // capture may still record the composited display.
+        // The history window shows the same content, so it follows too.
         stealthObservation = viewModel.$isStealthEnabled
-            .sink { [weak self] enabled in
-                self?.panel?.sharingType = enabled ? .none : .readOnly
+            .sink { [weak self] _ in
+                // The publisher fires before the property changes; read it on the next turn.
+                DispatchQueue.main.async { self?.applyStealth() }
             }
+    }
+
+    private func applyStealth() {
+        let sharing: NSWindow.SharingType = viewModel.isStealthEnabled ? .none : .readOnly
+        panel?.sharingType = sharing
+        historyWindow?.sharingType = sharing
     }
 }

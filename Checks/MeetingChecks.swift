@@ -8,6 +8,7 @@ struct MeetingChecks {
         checkTranscriptAssembler()
         checkStreamParser()
         checkKnowledgeAndPrompts()
+        checkMeetingHistory()
         print("All meeting checks passed")
     }
 
@@ -123,5 +124,34 @@ struct MeetingChecks {
         precondition(MeetingPrompts.hintTranscript(["aaaa", "bb", "cc"], characterLimit: 100) == ["aaaa", "bb", "cc"])
         precondition(MeetingPrompts.hintTranscript(["old", "a very long latest paragraph"], characterLimit: 5) == ["a very long latest paragraph"])
         precondition(MeetingPrompts.hintTranscript([], characterLimit: 5).isEmpty)
+    }
+
+    static func checkMeetingHistory() {
+        var turn = MeetingTurn(text: "来週です")
+        turn.translation = "下周。"
+        turn.archivedHints = ["旧提示"]
+        turn.hint = "新提示"
+        let entries = MeetingRecord.entries(from: [turn, MeetingTurn(text: "はい")])
+        precondition(entries[0] == MeetingRecord.Entry(text: "来週です", translation: "下周。", hints: ["旧提示", "新提示"]))
+        precondition(MeetingRecord.plainText(entries) == "Speaker: 来週です\n中文: 下周。\nHint: 旧提示\nHint: 新提示\n\nSpeaker: はい")
+
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting-history-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        precondition(MeetingHistoryStore.loadAll(from: folder).isEmpty, "Missing folder must read as empty")
+
+        // Whole seconds: ISO 8601 storage drops fractions.
+        let older = MeetingRecord(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_790_000_000), endedAt: Date(timeIntervalSince1970: 1_790_000_600), entries: entries)
+        var newer = MeetingRecord(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_790_090_000), endedAt: Date(timeIntervalSince1970: 1_790_090_060), entries: [])
+        try! MeetingHistoryStore.save(older, in: folder)
+        try! MeetingHistoryStore.save(newer, in: folder)
+        // Saving again overwrites the same meeting's file.
+        newer.entries = entries
+        try! MeetingHistoryStore.save(newer, in: folder)
+        try! "not json".write(to: folder.appendingPathComponent("broken.json"), atomically: true, encoding: .utf8)
+
+        let loaded = MeetingHistoryStore.loadAll(from: folder)
+        precondition(loaded == [newer, older], "History must round-trip newest first")
+        precondition(loaded[0].contains("下周") && loaded[0].contains("来週") && !loaded[0].contains("再来年"))
     }
 }

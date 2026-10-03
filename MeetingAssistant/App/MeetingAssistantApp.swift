@@ -23,6 +23,11 @@ struct MeetingAssistantApp: App {
                     appDelegate.viewModel.requestHintNow()
                 }
                 .keyboardShortcut(.return, modifiers: [.command, .shift])
+
+                Button("Meeting History") {
+                    appDelegate.showHistory()
+                }
+                .keyboardShortcut("y", modifiers: .command)
             }
         }
     }

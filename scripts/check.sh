@@ -10,6 +10,9 @@ src="$repo_root/MeetingAssistant"
 xcrun swiftc \
     -module-cache-path "$work_dir/module-cache" \
     "$src/Models/TranscriptionLanguage.swift" \
+    "$src/Models/MeetingTurn.swift" \
+    "$src/Models/MeetingRecord.swift" \
+    "$src/Services/MeetingHistoryStore.swift" \
     "$src/Services/MeetingCallDetector.swift" \
     "$src/Services/MeetingKnowledge.swift" \
     "$src/Services/MeetingPrompts.swift" \
