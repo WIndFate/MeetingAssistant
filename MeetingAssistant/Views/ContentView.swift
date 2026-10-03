@@ -57,8 +57,8 @@ private struct MeetingTimelineView: View {
     @ObservedObject var live: LiveTranscript
 
     // A lone character is usually recognizer noise; do not flash it.
-    private var visibleLiveText: String {
-        live.text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 ? live.text : ""
+    private func visible(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 ? text : ""
     }
 
     var body: some View {
@@ -79,7 +79,7 @@ private struct MeetingTimelineView: View {
             GeometryReader { viewport in
                 FollowBottomScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        if viewModel.turns.isEmpty && visibleLiveText.isEmpty {
+                        if viewModel.turns.isEmpty && visible(live.text).isEmpty && visible(live.mine).isEmpty {
                             Text(viewModel.isListening ? "Waiting for speech..." : viewModel.statusText)
                                 .font(.system(size: 13, weight: .medium, design: .rounded))
                                 .foregroundStyle(.secondary)
@@ -88,8 +88,11 @@ private struct MeetingTimelineView: View {
                         ForEach(viewModel.turns) { turn in
                             TurnView(turn: turn, width: viewport.size.width)
                         }
-                        if !visibleLiveText.isEmpty {
-                            MessageBubble(text: visibleLiveText, style: .draft, width: viewport.size.width)
+                        if !visible(live.text).isEmpty {
+                            MessageBubble(text: live.text, style: .draft, width: viewport.size.width)
+                        }
+                        if !visible(live.mine).isEmpty {
+                            MessageBubble(text: live.mine, style: .mineDraft, width: viewport.size.width)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,7 +120,7 @@ private struct TurnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            MessageBubble(text: turn.text, style: .incoming, width: width) {
+            MessageBubble(text: turn.text, style: turn.isMine ? .mine : .incoming, width: width) {
                 if turn.isTranslating || !turn.translation.isEmpty || turn.translationError != nil {
                     TranslationView(text: turn.translation, isLoading: turn.isTranslating, error: turn.translationError)
                 }

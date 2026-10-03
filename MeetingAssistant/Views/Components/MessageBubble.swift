@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// Chat-style bubble (iMessage / LINE): speaker text on the left, reply
-/// hints on the right. Bubbles hug their content and grow with the window up
+/// Chat-style bubble (iMessage / LINE): other participants on the left, the
+/// user's own words (green) and reply hints (blue) on the right. Bubbles hug their content and grow with the window up
 /// to `maxWidthFraction` of it.
 struct MessageBubble<Accessory: View>: View {
     enum Style: Equatable {
         case incoming
         case draft
+        case mine
+        case mineDraft
         case hint
     }
 
@@ -29,7 +31,7 @@ struct MessageBubble<Accessory: View>: View {
         self.accessory = accessory
     }
 
-    private var isTrailing: Bool { style == .hint }
+    private var isTrailing: Bool { style == .hint || style == .mine || style == .mineDraft }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -64,6 +66,8 @@ struct MessageBubble<Accessory: View>: View {
         switch style {
         case .incoming: return Color(white: 0.22)
         case .draft: return Color(white: 0.16)
+        case .mine: return Color(red: 0.13, green: 0.45, blue: 0.27)
+        case .mineDraft: return Color(red: 0.09, green: 0.24, blue: 0.16)
         case .hint: return Color(red: 0.04, green: 0.52, blue: 1.0)
         }
     }
@@ -71,8 +75,8 @@ struct MessageBubble<Accessory: View>: View {
     private var foreground: Color {
         switch style {
         case .incoming: return .white.opacity(0.95)
-        case .draft: return .white.opacity(0.6)
-        case .hint: return .white
+        case .draft, .mineDraft: return .white.opacity(0.6)
+        case .mine, .hint: return .white
         }
     }
 }

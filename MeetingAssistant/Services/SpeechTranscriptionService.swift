@@ -4,7 +4,8 @@ import Foundation
 import os
 import Speech
 
-/// System audio → Process Tap → SpeechAnalyzer → paragraphs.
+/// Audio source → SpeechAnalyzer → paragraphs. One instance per source:
+/// system audio (other participants) or the microphone (the user).
 ///
 /// Paragraph rules live in `TranscriptAssembler`, including mid-speech cuts
 /// at sentence ends. This service only decides *when* the speaker went quiet
@@ -20,11 +21,22 @@ import Speech
 /// own endpointing (~2s).
 @MainActor
 final class SpeechTranscriptionService {
+    enum Source {
+        case system
+        case microphone
+    }
+
     var onStateChange: ((TranscriptionState) -> Void)?
     private(set) var state = TranscriptionState()
+    let source: Source
+    /// Microphone only: remove the meeting's echo from the mic.
+    var usesEchoCancellation = false
+    /// System audio only: see `ProcessTapAudioCaptureService.start`.
+    private(set) var anchorsToOutputDevice = true
 
-    private let audioQueue = DispatchQueue(label: "MeetingAssistant.Audio")
-    private lazy var capture = ProcessTapAudioCaptureService(callbackQueue: audioQueue)
+    private let audioQueue: DispatchQueue
+    private lazy var tapCapture = ProcessTapAudioCaptureService(callbackQueue: audioQueue)
+    private lazy var micCapture = MicrophoneCaptureService(callbackQueue: audioQueue)
     // Internal (not private) so a headless harness can feed recorded audio.
     let feedSlot = AudioFeedSlot()
     let levelMeter = AudioLevelMeter()
@@ -32,6 +44,10 @@ final class SpeechTranscriptionService {
     private var assembler = TranscriptAssembler(language: .japanese)
     private var language: TranscriptionLanguage = .japanese
     private var generation = 0
+    // Bumped whenever a capture starts or stops: a torn-down capture's
+    // device-alive callback can still arrive afterwards and must not stop
+    // the capture that replaced it.
+    private var captureGeneration = 0
 
     private var quietTask: Task<Void, Never>?
     private var finalizeFallbackTask: Task<Void, Never>?
@@ -49,6 +65,11 @@ final class SpeechTranscriptionService {
     // paragraph with what is already final; volatile text stays live.
     private let finalizeFallbackDelay: Duration = .milliseconds(1500)
 
+    init(source: Source) {
+        self.source = source
+        audioQueue = DispatchQueue(label: "MeetingAssistant.Audio.\(source)")
+    }
+
     func start(language: TranscriptionLanguage) async {
         guard !state.isListening else { return }
         self.language = language
@@ -56,18 +77,13 @@ final class SpeechTranscriptionService {
         setStatus("Starting...")
         do {
             try await ensureSpeechPermission()
-            try await startEngine(language: language)
-            try capture.start(
-                audioHandler: { [feedSlot, levelMeter] buffer in
-                    levelMeter.record(buffer)
-                    feedSlot.feed?.append(buffer)
-                },
-                failureHandler: { [weak self] error in
-                    Task { @MainActor in
-                        self?.fail(error)
-                    }
+            if source == .microphone {
+                guard await AVAudioApplication.requestRecordPermission() else {
+                    throw MicrophoneCaptureError.permissionDenied
                 }
-            )
+            }
+            try await startEngine(language: language)
+            try startCapture()
             state.isListening = true
             setStatus("Listening (\(language.shortTitle)).")
         } catch {
@@ -76,7 +92,7 @@ final class SpeechTranscriptionService {
     }
 
     func stop() {
-        capture.stop()
+        stopCapture()
         stopEngine()
         assembler.flushAll()
         state.isListening = false
@@ -115,6 +131,59 @@ final class SpeechTranscriptionService {
     func clear() {
         assembler.reset()
         syncTranscript()
+    }
+
+    /// System audio only. Rebuilds just the capture; the recognizer and the
+    /// paragraph being spoken carry on.
+    func setAnchorsToOutputDevice(_ anchored: Bool) {
+        guard anchored != anchorsToOutputDevice else { return }
+        anchorsToOutputDevice = anchored
+        guard source == .system, state.isListening else { return }
+        stopCapture()
+        do {
+            try startCapture()
+        } catch {
+            fail(error)
+        }
+    }
+
+    // MARK: - Capture
+
+    private func startCapture() throws {
+        let audioHandler: (AVAudioPCMBuffer) -> Void = { [feedSlot, levelMeter] buffer in
+            levelMeter.record(buffer)
+            feedSlot.feed?.append(buffer)
+        }
+        captureGeneration += 1
+        let current = captureGeneration
+        let failureHandler: (Error) -> Void = { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.captureGeneration == current else { return }
+                self.fail(error)
+            }
+        }
+        switch source {
+        case .system:
+            try tapCapture.start(
+                anchorsToOutputDevice: anchorsToOutputDevice,
+                audioHandler: audioHandler,
+                failureHandler: failureHandler
+            )
+        case .microphone:
+            try micCapture.start(
+                echoCancellation: usesEchoCancellation,
+                audioHandler: audioHandler,
+                failureHandler: failureHandler
+            )
+        }
+    }
+
+    private func stopCapture() {
+        captureGeneration += 1
+        switch source {
+        case .system: tapCapture.stop()
+        case .microphone: micCapture.stop()
+        }
     }
 
     // MARK: - Engine
@@ -223,7 +292,7 @@ final class SpeechTranscriptionService {
     }
 
     private func fail(_ error: Error) {
-        capture.stop()
+        stopCapture()
         stopEngine()
         assembler.flushAll()
         state.isListening = false

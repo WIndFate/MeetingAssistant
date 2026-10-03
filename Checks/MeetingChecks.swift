@@ -1,3 +1,4 @@
+import CoreAudio
 import Foundation
 
 @main
@@ -9,6 +10,7 @@ struct MeetingChecks {
         checkStreamParser()
         checkKnowledgeAndPrompts()
         checkMeetingHistory()
+        checkEchoCancellationChoice()
         print("All meeting checks passed")
     }
 
@@ -124,6 +126,9 @@ struct MeetingChecks {
         precondition(MeetingPrompts.hintTranscript(["aaaa", "bb", "cc"], characterLimit: 100) == ["aaaa", "bb", "cc"])
         precondition(MeetingPrompts.hintTranscript(["old", "a very long latest paragraph"], characterLimit: 5) == ["a very long latest paragraph"])
         precondition(MeetingPrompts.hintTranscript([], characterLimit: 5).isEmpty)
+        precondition(MeetingPrompts.hintLine("了解です", isMine: true) == "[Me] 了解です")
+        precondition(MeetingPrompts.hintLine("どうですか", isMine: false) == "どうですか")
+        precondition(MeetingPrompts.hintSystem(knowledge).contains("[Me]"))
     }
 
     static func checkMeetingHistory() {
@@ -150,8 +155,25 @@ struct MeetingChecks {
         try! MeetingHistoryStore.save(newer, in: folder)
         try! "not json".write(to: folder.appendingPathComponent("broken.json"), atomically: true, encoding: .utf8)
 
+        // Records saved before the microphone existed decode as other participants.
+        let legacy = #"{"text":"はい","translation":"好","hints":[]}"#
+        let decoded = try! JSONDecoder().decode(MeetingRecord.Entry.self, from: Data(legacy.utf8))
+        precondition(decoded == MeetingRecord.Entry(text: "はい", translation: "好", hints: []) && !decoded.isMine)
+        var mine = MeetingTurn(text: "了解です", isMine: true)
+        mine.translation = "明白。"
+        precondition(MeetingRecord.plainText(MeetingRecord.entries(from: [mine])) == "Me: 了解です\n中文: 明白。")
+
         let loaded = MeetingHistoryStore.loadAll(from: folder)
         precondition(loaded == [newer, older], "History must round-trip newest first")
         precondition(loaded[0].contains("下周") && loaded[0].contains("来週") && !loaded[0].contains("再来年"))
+    }
+
+    static func checkEchoCancellationChoice() {
+        let headphones: UInt32 = 0x6864_706E // 'hdpn'
+        let speakers: UInt32 = 0x6973_706B   // 'ispk'
+        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBuiltIn, dataSource: speakers))
+        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBuiltIn, dataSource: headphones))
+        precondition(!MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeBluetooth, dataSource: nil))
+        precondition(MicrophoneCaptureService.needsEchoCancellation(transportType: kAudioDeviceTransportTypeHDMI, dataSource: nil))
     }
 }

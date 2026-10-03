@@ -5,6 +5,8 @@ import Foundation
 struct MeetingTurn: Identifiable, Equatable {
     let id = UUID()
     var text: String
+    /// Said by the user (microphone) rather than another participant.
+    var isMine = false
     var translation = ""
     var isTranslating = false
     var translationError: String?

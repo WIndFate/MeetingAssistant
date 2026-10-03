@@ -35,7 +35,13 @@ final class ProcessTapAudioCaptureService: @unchecked Sendable {
         stop()
     }
 
+    /// - Parameter anchorsToOutputDevice: Clock the aggregate from the current
+    ///   system output. Required by default (a tap-only aggregate has delivered
+    ///   all-zero audio), but voice processing on the microphone takes over the
+    ///   built-in output and stops an anchored aggregate entirely; a tap-only
+    ///   aggregate kept delivering real audio alongside it on macOS 26.6.
     func start(
+        anchorsToOutputDevice: Bool = true,
         audioHandler: @escaping AudioHandler,
         failureHandler: @escaping FailureHandler
     ) throws {
@@ -73,24 +79,24 @@ final class ProcessTapAudioCaptureService: @unchecked Sendable {
                 kAudioSubTapUIDKey: tapUID,
                 kAudioSubTapDriftCompensationKey: true,
             ]
-            let aggregateDescription: [String: Any] = [
+            var aggregateDescription: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "Meeting Assistant Audio Capture \(UUID().uuidString)",
                 kAudioAggregateDeviceUIDKey: "com.windfate.meetingassistant.tap.\(UUID().uuidString)",
-                // Anchor the private aggregate to the current system output.
-                // A tap-only aggregate can start its IOProc yet deliver only
-                // zeroes because it has no hardware clock/source device.
-                kAudioAggregateDeviceMainSubDeviceKey: systemOutputUID,
                 kAudioAggregateDeviceIsPrivateKey: true,
                 kAudioAggregateDeviceIsStackedKey: false,
-                kAudioAggregateDeviceSubDeviceListKey: [
-                    [kAudioSubDeviceUIDKey: systemOutputUID],
-                ],
                 // The aggregate must be born with its complete sub-tap
                 // composition. Attaching only a UUID after creation can leave
                 // the IOProc running while every delivered sample is zero.
                 kAudioAggregateDeviceTapListKey: [subTapDescription],
                 kAudioAggregateDeviceTapAutoStartKey: true,
             ]
+            if anchorsToOutputDevice {
+                // Anchor the private aggregate to the current system output.
+                // A tap-only aggregate can start its IOProc yet deliver only
+                // zeroes because it has no hardware clock/source device.
+                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = systemOutputUID
+                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = [[kAudioSubDeviceUIDKey: systemOutputUID]]
+            }
             try checkStatus(
                 AudioHardwareCreateAggregateDevice(
                     aggregateDescription as CFDictionary,
@@ -138,6 +144,7 @@ final class ProcessTapAudioCaptureService: @unchecked Sendable {
             print(
                 "[ProcessTapAudioCaptureService] started " +
                     "tapID=\(createdTapID) aggregateDeviceID=\(createdAggregateDeviceID) " +
+                    "anchored=\(anchorsToOutputDevice) " +
                     "sampleRate=\(Int(sourceFormat.sampleRate)) channels=\(sourceFormat.channelCount)"
             )
             Self.logger.info(

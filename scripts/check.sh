@@ -13,6 +13,7 @@ xcrun swiftc \
     "$src/Models/MeetingTurn.swift" \
     "$src/Models/MeetingRecord.swift" \
     "$src/Services/MeetingHistoryStore.swift" \
+    "$src/Services/MicrophoneCaptureService.swift" \
     "$src/Services/MeetingCallDetector.swift" \
     "$src/Services/MeetingKnowledge.swift" \
     "$src/Services/MeetingPrompts.swift" \

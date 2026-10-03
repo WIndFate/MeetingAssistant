@@ -1,11 +1,12 @@
 import Combine
 import Foundation
 
-/// Live text of the paragraph being spoken. Separate object so ~5 partial
-/// updates per second re-render only the draft bubble, not the whole list.
+/// Live text of the paragraphs being spoken. Separate object so ~5 partial
+/// updates per second re-render only the draft bubbles, not the whole list.
 @MainActor
 final class LiveTranscript: ObservableObject {
     @Published fileprivate(set) var text = ""
+    @Published fileprivate(set) var mine = ""
 }
 
 /// The single entry point for the UI: listening, per-paragraph translation,
@@ -21,14 +22,20 @@ final class MeetingViewModel: ObservableObject {
     @Published private(set) var language: TranscriptionLanguage
     @Published private(set) var callAlertText: String?
     @Published var isStealthEnabled = true
+    /// Also transcribe the user's microphone. Off on every launch.
+    @Published private(set) var isMicEnabled = false
 
     let live = LiveTranscript()
     let settings: SettingsViewModel
 
-    private let transcription = SpeechTranscriptionService()
+    private let transcription = SpeechTranscriptionService(source: .system)
+    private let myTranscription = SpeechTranscriptionService(source: .microphone)
+    // Paragraphs of each source already turned into turns.
+    private var systemParagraphCount = 0
+    private var micParagraphCount = 0
     private var translationTasks: [MeetingTurn.ID: Task<Void, Never>] = [:]
     private var hintTask: Task<Void, Never>?
-    // Name calls in paragraphs at or below this index have been answered.
+    // Name calls in turns at or below this index have been answered.
     private var handledCallThroughIndex = -1
     private var callCheckTask: Task<Void, Never>?
     private var shortCallGraceIndex: Int?
@@ -68,15 +75,39 @@ final class MeetingViewModel: ObservableObject {
         transcription.onStateChange = { [weak self] state in
             self?.accept(state)
         }
+        myTranscription.onStateChange = { [weak self] state in
+            self?.acceptMine(state)
+        }
     }
 
     // MARK: - Intents
 
     func toggleListening() {
         if isListening {
+            myTranscription.stop()
             transcription.stop()
         } else {
-            Task { await transcription.start(language: language) }
+            configureCaptureForMicrophone()
+            Task {
+                await transcription.start(language: language)
+                if isMicEnabled, isListening {
+                    await myTranscription.start(language: language)
+                }
+            }
+        }
+    }
+
+    /// The mic follows listening: toggling it while stopped only sets what
+    /// the next start does.
+    func toggleMicrophone() {
+        isMicEnabled.toggle()
+        guard isListening else { return }
+        if isMicEnabled {
+            configureCaptureForMicrophone()
+            Task { await myTranscription.start(language: language) }
+        } else {
+            myTranscription.stop()
+            configureCaptureForMicrophone()
         }
     }
 
@@ -84,7 +115,10 @@ final class MeetingViewModel: ObservableObject {
         guard newLanguage != language else { return }
         language = newLanguage
         UserDefaults.standard.set(newLanguage.rawValue, forKey: Self.languageKey)
-        Task { await transcription.switchLanguage(to: newLanguage) }
+        Task {
+            await transcription.switchLanguage(to: newLanguage)
+            await myTranscription.switchLanguage(to: newLanguage)
+        }
     }
 
     func toggleLanguage() {
@@ -109,12 +143,16 @@ final class MeetingViewModel: ObservableObject {
         clearCallAlert()
         turns = []
         transcription.clear()
+        myTranscription.clear()
+        systemParagraphCount = 0
+        micParagraphCount = 0
     }
 
     /// Hotkey / button: reply hint from the recent transcript, name or not.
     func requestHintNow() {
         Task {
             await transcription.commitLiveText()
+            await myTranscription.commitLiveText()
             guard !turns.isEmpty else {
                 showCallAlert("无可回答内容")
                 return
@@ -151,23 +189,50 @@ final class MeetingViewModel: ObservableObject {
     private func accept(_ state: TranscriptionState) {
         if isListening != state.isListening { isListening = state.isListening }
         if statusText != state.statusText { statusText = state.statusText }
-        if lastError != state.lastError { lastError = state.lastError }
+        syncError()
         if live.text != state.partialTranscript { live.text = state.partialTranscript }
+        appendTurns(from: state.paragraphs, count: &systemParagraphCount, isMine: false)
 
-        if state.paragraphs.count < turns.count {
-            // Transcript was cleared underneath us.
-            turns = []
-            handledCallThroughIndex = -1
-        }
-        while turns.count < state.paragraphs.count {
-            turns.append(MeetingTurn(text: state.paragraphs[turns.count]))
-            translate(turnAt: turns.count - 1)
-        }
-
+        // Only other participants can call the user.
         if callAlertText == nil, MeetingCallDetector.containsCall(state.partialTranscript, aliases: settings.aliases) {
             showCallAlert("被点名了 · 等对方说完")
         }
         scheduleCallCheck()
+    }
+
+    private func acceptMine(_ state: TranscriptionState) {
+        if live.mine != state.partialTranscript { live.mine = state.partialTranscript }
+        syncError()
+        appendTurns(from: state.paragraphs, count: &micParagraphCount, isMine: true)
+        // A failed mic (permission, device change) turns itself off.
+        if isMicEnabled, !state.isListening, state.lastError != nil {
+            isMicEnabled = false
+            configureCaptureForMicrophone()
+        }
+    }
+
+    /// Paragraphs from both sources join one timeline in the order they close.
+    private func appendTurns(from paragraphs: [String], count: inout Int, isMine: Bool) {
+        count = min(count, paragraphs.count)
+        while count < paragraphs.count {
+            turns.append(MeetingTurn(text: paragraphs[count], isMine: isMine))
+            count += 1
+            translate(turnAt: turns.count - 1)
+        }
+    }
+
+    private func syncError() {
+        let error = transcription.state.lastError ?? myTranscription.state.lastError
+        if lastError != error { lastError = error }
+    }
+
+    /// Voice processing on the mic takes over the built-in output and stops an
+    /// output-anchored system capture, so the system side switches to a
+    /// tap-only capture while it runs. Headphones need neither.
+    private func configureCaptureForMicrophone() {
+        let echoCancellation = isMicEnabled && MicrophoneCaptureService.currentOutputNeedsEchoCancellation()
+        myTranscription.usesEchoCancellation = echoCancellation
+        transcription.setAnchorsToOutputDevice(!echoCancellation)
     }
 
     // MARK: - Translation
@@ -225,19 +290,18 @@ final class MeetingViewModel: ObservableObject {
     }
 
     private func requestHintIfCallSettled() {
-        let paragraphs = transcription.state.paragraphs
         let firstUnhandled = handledCallThroughIndex + 1
-        guard firstUnhandled < paragraphs.count,
-              let callIndex = (firstUnhandled..<paragraphs.count).last(where: {
-                  MeetingCallDetector.containsCall(paragraphs[$0], aliases: settings.aliases)
+        guard firstUnhandled < turns.count,
+              let callIndex = (firstUnhandled..<turns.count).last(where: {
+                  !turns[$0].isMine && MeetingCallDetector.containsCall(turns[$0].text, aliases: settings.aliases)
               })
         else { return }
         // Still talking: the question is not finished yet.
         guard transcription.state.partialTranscript.count < 2 else { return }
 
-        let lastIndex = paragraphs.count - 1
-        let callText = paragraphs[callIndex].trimmingCharacters(in: .whitespacesAndNewlines)
-        if callIndex == lastIndex, callText.count <= shortCallParagraphLength, shortCallGraceIndex != callIndex {
+        let lastRemoteIndex = turns.lastIndex(where: { !$0.isMine })
+        let callText = turns[callIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if callIndex == lastRemoteIndex, callText.count <= shortCallParagraphLength, shortCallGraceIndex != callIndex {
             shortCallGraceIndex = callIndex
             let delay = shortCallGraceDelay
             callCheckTask = Task { [weak self] in
@@ -257,11 +321,13 @@ final class MeetingViewModel: ObservableObject {
 
     private func requestHint(reason: String) {
         cancelShortCallGrace()
-        let paragraphs = transcription.state.paragraphs
-        guard !paragraphs.isEmpty, turns.count == paragraphs.count else { return }
-        handledCallThroughIndex = paragraphs.count - 1
+        guard !turns.isEmpty else { return }
+        handledCallThroughIndex = turns.count - 1
 
-        let transcript = MeetingPrompts.hintTranscript(paragraphs, characterLimit: hintCharacterLimit)
+        let transcript = MeetingPrompts.hintTranscript(
+            turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
+            characterLimit: hintCharacterLimit
+        )
         // The hint attaches to the latest paragraph.
         let index = turns.count - 1
         if !turns[index].hint.isEmpty {

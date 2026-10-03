@@ -24,6 +24,8 @@
     <true/>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Meeting Assistant captures system audio so it can transcribe and translate the meeting in real time.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>When you turn the microphone on, Meeting Assistant transcribes what you say alongside the meeting, on this Mac.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Meeting Assistant uses on-device Apple speech recognition to turn meeting audio into live transcript text.</string>
 </dict>

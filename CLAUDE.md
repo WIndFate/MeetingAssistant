@@ -13,7 +13,7 @@ Meeting Assistant 是一个原生 macOS 浮动面板应用，在线上会议中�
 ### 明确不做
 
 - 不引入后端进程、额外的语音模型（Whisper 等）或任何第三方依赖
-- 不做说话人分离、录音音频存档、会议纪要生成（文字记录的本地历史属于转写和翻译的直接延伸，见第 10 节）
+- 不做远端说话人分离（只按音频来源区分「我」和「对方」，见 6.3）、录音音频存档、会议纪要生成（文字记录的本地历史属于转写和翻译的直接延伸，见第 10 节）
 - 不增加额外的 LLM 调用（意图分类、转写纠错、路由、复核等）
 
 新增功能前先判断是否属于上述三项能力的直接延伸；如果不是，先与用户确认。
@@ -32,10 +32,11 @@ Meeting Assistant 是一个原生 macOS 浮动面板应用，在线上会议中�
 ```text
 MeetingAssistant.xcodeproj/        Xcode 工程；MeetingAssistant/ 是文件系统同步组，新增源文件不需要改 pbxproj
 Config/Info.plist                  app 元数据与权限说明（不放在同步组内，避免被当作资源复制）
+Config/MeetingAssistant.entitlements  hardened runtime 下使用麦克风所需的 audio-input 授权
 MeetingAssistant/
   App/                             启动入口、AppDelegate（浮动面板、全局快捷键、隐身）、NonActivatingFloatingPanel
   Models/                          值类型：TranscriptionLanguage、TranscriptionState、MeetingTurn、MeetingRecord（历史记录）
-  Services/                        音频采集、转写、段落组装、提示词、知识库、OpenAI、Keychain、点名检测
+  Services/                        系统音频与麦克风采集、转写、段落组装、提示词、知识库、OpenAI、Keychain、点名检测
   ViewModels/                      MeetingViewModel（面板唯一业务入口）、SettingsViewModel、HistoryViewModel（历史窗口）
   Views/                           ContentView、HistoryView 与 Components/
 Checks/MeetingChecks.swift         纯逻辑检查（不属于 app target），由 scripts/check.sh 编译运行
@@ -94,6 +95,9 @@ scripts/check.sh                   纯逻辑检查脚本
 - 输入 `AudioBufferList` 只能在同步回调内复制为自有 `AVAudioPCMBuffer`；复制前必须先设置 `frameLength`（初始的 `mDataByteSize` 为 0，会把音频复制成全零）
 - 停止和失败清理的顺序固定为：`AudioDeviceStop` → `AudioDeviceDestroyIOProcID` → `AudioHardwareDestroyAggregateDevice` → `AudioHardwareDestroyProcessTap`。Start / Stop 重复调用不能残留 tap 或 aggregate device
 
+- 采集故障回调用 `captureGeneration` 过滤：被替换或已停止的 aggregate 的 device-alive 回调可能晚到，不能让它停掉新的采集
+- 麦克风开启了语音处理时，aggregate 改为只挂 tap、不挂输出设备（`anchorsToOutputDevice = false`）：语音处理会接管内置输出，挂在输出设备上的 aggregate 会整个停止回调。实测（macOS 26.6）只挂 tap 时能正常采到音频；关麦后恢复挂输出设备
+
 ### 6.2 段落组装（`TranscriptAssembler`）
 
 - 实时行 = 本段已定稿文本 + 当前 volatile 文本。final 替换 volatile 时实时行不会倒退，不需要额外的防倒退逻辑
@@ -107,6 +111,15 @@ scripts/check.sh                   纯逻辑检查脚本
 - 手动请求回答提示时，先请求 finalize，最多等 1s 再关段。禁止直接把 volatile 文本提交成段落，否则它的 final 到达后会重复
 - 停止监听或切换语言时，用 `flushAll()` 保留已听到的全部文本
 - 修改上述任何规则时，必须同步更新 `Checks/MeetingChecks.swift`
+
+### 6.3 麦克风（「我」的发言）
+
+- 工具栏麦克风按钮控制，每次启动默认关闭；跟随收听开关：没在收听时切换只决定下次开始时是否开麦
+- 「我」和「对方」各用一个 `SpeechTranscriptionService`（source 分别为 `.microphone` / `.system`），各自独立的 analyzer、分段和停顿判定；两边的段落按关闭顺序合并到同一时间线，`MeetingTurn.isMine` 标记来源
+- 外放时（内置扬声器、HDMI/USB 等）开启 Apple 语音处理消除回声，other-audio ducking 固定为 `.min`。实测：不处理时扬声器回声被完整转写成"我"的话；开启后回声为 0 字，双讲时用户的话仍清楚。代价是会议声音被压低约 8 dB；默认 ducking 约 -30 dB，几乎静音，禁止使用；高级 ducking 没有改善
+- 戴耳机（内置耳机孔、蓝牙）时不开语音处理，直接录原始麦克风，会议音量不受影响
+- 语音处理的输入有多个声道，只取第 0 声道（处理后的人声）
+- 点名检测只看对方的段落；回答提示里用户自己的段落以 `[Me]` 开头
 
 ## 7. LLM 与提示词规则
 
@@ -155,7 +168,7 @@ scripts/check.sh                   纯逻辑检查脚本
 ## 9. UI 规则
 
 - 原则是低干扰、高密度、一眼能读完；工具栏保持单行，如果新增元素会降低读取效率就不加
-- 对话采用 iMessage / LINE 风格：发言是左侧灰色气泡，回答提示是右侧蓝色气泡；气泡宽度随内容自适应，最多占可用宽度的 78%，随窗口变宽而变宽，禁止写死最大宽度；不显示 Speaker 这类角色标签
+- 对话采用 iMessage / LINE 风格：对方的发言是左侧灰色气泡，「我」的发言是右侧绿色气泡，回答提示是右侧蓝色气泡；气泡宽度随内容自适应，最多占可用宽度的 78%，随窗口变宽而变宽，禁止写死最大宽度；不显示 Speaker 这类角色标签
 - 中文翻译属于原文的附属信息，放在发言气泡内的原文下方，用细线分隔。细线用 overlay 绘制，不能用 `Divider`：`Divider` 会撑满宽度，把每个气泡都拉到最大宽
 - 自动滚动只用原生的 `defaultScrollAnchor(.bottom, ...)`（见 `FollowBottomScrollView`），禁止手写 `scrollTo` 来跟随底部；`.initialOffset`、`.sizeChanges`、`.alignment` 三个角色都必须设为 `.bottom`，缺少 `.alignment` 时内容第一次超出视口后就不再跟随
 - 滚动容器外的条件性元素（如生成中的 `ProgressView`）必须常驻布局、用 opacity 隐藏；条件插入会改变容器高度，导致贴底失效
@@ -165,6 +178,7 @@ scripts/check.sh                   纯逻辑检查脚本
 
 ## 10. 安全与隐私
 
+- 麦克风只在用户打开麦克风按钮时使用，不保存音频
 - API key 只存 Keychain；开发时可以用 scheme 环境变量 `OPENAI_API_KEY`。不得写入文件、UserDefaults、日志或提交到仓库。`scripts/check.sh` 会扫描已跟踪文件中的 `sk-...`；scheme 是共享文件，不要把填了 key 的 scheme 提交上去
 - 会议文字记录（原文、翻译、回答提示）由 `MeetingHistoryStore` 保存在 `~/Library/Application Support/MeetingAssistant/History/`，每场会议一个 JSON 文件。该目录在仓库之外，**禁止把记录写进仓库目录**
 - 一场会议从"启动或清空后的第一段"开始，到下一次清空或退出时结束；进行中最多每 5 秒保存一次（节流而不是防抖，持续讲话时防抖会一直推迟写入），清空、退出和打开历史窗口时立即保存

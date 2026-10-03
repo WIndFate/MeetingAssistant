@@ -83,7 +83,7 @@ private struct HistoryDetailView: View {
                         .foregroundStyle(.secondary)
                     ForEach(Array(record.entries.enumerated()), id: \.offset) { _, entry in
                         VStack(alignment: .leading, spacing: 6) {
-                            MessageBubble(text: entry.text, style: .incoming, width: viewport.size.width) {
+                            MessageBubble(text: entry.text, style: entry.isMine ? .mine : .incoming, width: viewport.size.width) {
                                 if !entry.translation.isEmpty {
                                     TranslationView(text: entry.translation, isLoading: false, error: nil)
                                 }

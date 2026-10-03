@@ -39,6 +39,15 @@ struct ToolbarView: View {
             .help("Meeting language (⌘⇧L)")
 
             ToolbarIconButton(
+                systemImage: viewModel.isMicEnabled ? "mic.fill" : "mic.slash",
+                isHighlighted: viewModel.isMicEnabled,
+                help: viewModel.isMicEnabled
+                    ? "Transcribing your microphone. Click to mute."
+                    : "Microphone off. Click to also transcribe what you say.",
+                action: viewModel.toggleMicrophone
+            )
+
+            ToolbarIconButton(
                 systemImage: "text.bubble",
                 isHighlighted: false,
                 help: "Reply hint now (⌘⇧Return)",

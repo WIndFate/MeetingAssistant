@@ -48,7 +48,7 @@ enum MeetingPrompts {
 
         Rules:
         - 对方在问 and 要点 are always written in Simplified Chinese, even when the meeting is in Japanese or English. Only 可以这样说 uses the meeting language.
-        - The transcript is live speech recognition without speaker labels and may contain misrecognized words; infer the intended meaning from context.
+        - The transcript is live speech recognition and may contain misrecognized words; infer the intended meaning from context. Lines starting with [Me] are what the user already said; other lines are the other participants, without names. Do not suggest repeating what the user already said; build on it, and if the user has already answered, say so in 对方在问 and keep 可以这样说 to a short follow-up.
         - Ground the hint in what was actually discussed and in the meeting background. Never invent facts, numbers, decisions or commitments the user has not made. When the needed facts are unknown, suggest an honest move instead: confirm the premise, ask a clarifying question, or say you will check and follow up.
         - If they ask whether the user has questions, concerns or anything unclear, draw on the whole transcript: point to 1-2 concrete items from the discussion worth confirming (a date, a number, an owner, a dependency), or a short thanks if nothing stands out.
         - If the name was only mentioned (talking about the user, not to them) and no reply is expected, say so in 对方在问 and write （无需回应） under 可以这样说.
@@ -65,12 +65,16 @@ enum MeetingPrompts {
         if !name.isEmpty {
             lines.append("The user is addressed as: \(name)")
         }
-        lines.append("Recent transcript (oldest first; the user was addressed near the end):")
+        lines.append("Recent transcript (oldest first; [Me] marks the user's own words; the user was addressed near the end):")
         lines += transcript
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .map { "- \($0)" }
         return lines.joined(separator: "\n")
+    }
+
+    static func hintLine(_ text: String, isMine: Bool) -> String {
+        isMine ? "[Me] \(text)" : text
     }
 
     /// The newest paragraphs whose total length fits `characterLimit`,
