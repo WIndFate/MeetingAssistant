@@ -8,7 +8,7 @@
          </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
-   <LaunchAction buildConfiguration = "Debug" selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle = "0" useCustomWorkingDirectory = "NO" ignoresPersistentStateOnLaunch = "NO" debugDocumentVersioning = "YES" debugServiceExtension = "internal" allowLocationSimulation = "YES">
+   <LaunchAction buildConfiguration = "Release" selectedDebuggerIdentifier = "" selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn" launchStyle = "0" useCustomWorkingDirectory = "NO" ignoresPersistentStateOnLaunch = "NO" debugDocumentVersioning = "YES" debugServiceExtension = "internal" allowLocationSimulation = "YES">
       <BuildableProductRunnable runnableDebuggingMode = "0">
          <BuildableReference BuildableIdentifier = "primary" BlueprintIdentifier = "0A0000000000000000000020" BuildableName = "MeetingAssistant.app" BlueprintName = "MeetingAssistant" ReferencedContainer = "container:MeetingAssistant.xcodeproj">
          </BuildableReference>

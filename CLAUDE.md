@@ -197,6 +197,9 @@ scripts/check.sh                   纯逻辑检查脚本
 
 ## 11. 验证要求
 
+共享 scheme 的 Run 使用 Release、不挂调试器（挂调试器时 HAL 会出现 `skipping cycle due to overload`）；需要断点时只在本地临时改回 Debug，不要提交。
+
+
 每次改动后至少完成：
 
 1. `./scripts/check.sh` 通过

@@ -37,6 +37,8 @@ cd MeetingAssistant
 open MeetingAssistant.xcodeproj   # 然后在 Xcode 中 Run（⌘R）
 ```
 
+scheme 的 Run 默认使用 **Release 配置、不挂调试器**，日常开会时性能更稳。需要打断点排查时，在 Edit Scheme → Run → Info 里临时改回 Debug 并勾选「Debug executable」。
+
 也可以用命令行构建：
 
 ```bash
