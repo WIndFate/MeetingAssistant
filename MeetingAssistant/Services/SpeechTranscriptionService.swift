@@ -53,6 +53,9 @@ final class SpeechTranscriptionService {
     private var startRequest = 0
     /// Why the last run stopped, for callers that react to specific errors.
     private(set) var lastFailure: Error?
+    /// Paused: the capture keeps running but its audio is dropped, so the
+    /// mic mutes and unmutes without rebuilding any audio device.
+    private(set) var isPaused = false
 
     private var quietTask: Task<Void, Never>?
     private var finalizeFallbackTask: Task<Void, Never>?
@@ -80,6 +83,7 @@ final class SpeechTranscriptionService {
         startRequest += 1
         let request = startRequest
         self.language = language
+        isPaused = false
         clearError()
         setStatus("Starting...")
         do {
@@ -161,8 +165,10 @@ final class SpeechTranscriptionService {
 
     private func startCapture() throws {
         let audioHandler: (AVAudioPCMBuffer) -> Void = { [feedSlot, levelMeter] buffer in
+            // No feed while paused or between engines: drop the audio.
+            guard let feed = feedSlot.feed else { return }
             levelMeter.record(buffer)
-            feedSlot.feed?.append(buffer)
+            feed.append(buffer)
         }
         captureGeneration += 1
         let current = captureGeneration
@@ -219,7 +225,7 @@ final class SpeechTranscriptionService {
             return
         }
         self.engine = engine
-        feedSlot.feed = engine.feed
+        feedSlot.feed = isPaused ? nil : engine.feed
     }
 
     private func stopEngine() {
@@ -299,6 +305,23 @@ final class SpeechTranscriptionService {
     private func setStatus(_ text: String) {
         state.statusText = text
         onStateChange?(state)
+    }
+
+    func setPaused(_ paused: Bool) {
+        guard paused != isPaused else { return }
+        isPaused = paused
+        if paused {
+            // What was said before the mute finalizes and closes as usual.
+            // Only with pending text: finalizing nothing makes the analyzer
+            // fail with RecogRejected, which stopped the muted mic.
+            if !assembler.volatileText.isEmpty {
+                engine?.finalize()
+            }
+            feedSlot.feed = nil
+        } else {
+            feedSlot.feed = engine?.feed
+        }
+        print("[SpeechTranscriptionService] source=\(source) paused=\(paused)")
     }
 
     func clearError() {

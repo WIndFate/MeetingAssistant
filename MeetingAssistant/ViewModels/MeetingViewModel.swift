@@ -106,17 +106,19 @@ final class MeetingViewModel: ObservableObject {
     }
 
     /// The mic follows listening: toggling it while stopped only sets what
-    /// the next start does.
+    /// the next start does. The first switch-on in a session opens the mic
+    /// (and voice processing on speakers); after that the button only mutes,
+    /// because rebuilding the capture each time cut the meeting audio and
+    /// made the ducking come and go. Stopping listening releases the mic.
     func toggleMicrophone() {
         isMicEnabled.toggle()
         clearMicrophoneError()
         guard isListening else { return }
-        if isMicEnabled {
+        if myTranscription.state.isListening {
+            myTranscription.setPaused(!isMicEnabled)
+        } else if isMicEnabled {
             configureCaptureForMicrophone()
             Task { await myTranscription.start(language: language) }
-        } else {
-            myTranscription.stop()
-            configureCaptureForMicrophone()
         }
     }
 
@@ -216,6 +218,8 @@ final class MeetingViewModel: ObservableObject {
     private func acceptMine(_ state: TranscriptionState) {
         if live.mine != state.partialTranscript { live.mine = state.partialTranscript }
         syncError()
+        // Muted while the mic was still starting.
+        if state.isListening { myTranscription.setPaused(!isMicEnabled) }
         appendTurns(from: state.paragraphs, count: &micParagraphCount, isMine: true)
         guard isMicEnabled, !state.isListening, state.lastError != nil else { return }
         if case MicrophoneCaptureError.deviceChanged? = myTranscription.lastFailure,
