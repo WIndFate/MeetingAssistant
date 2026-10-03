@@ -164,7 +164,7 @@ scripts/check.sh                   纯逻辑检查脚本
 
 ## 10. 安全与隐私
 
-- API key 只存 Keychain；开发时可以用 scheme 环境变量 `OPENAI_API_KEY`。不得写入文件、UserDefaults、日志或提交到仓库
+- API key 只存 Keychain；开发时可以用 scheme 环境变量 `OPENAI_API_KEY`。不得写入文件、UserDefaults、日志或提交到仓库。`scripts/check.sh` 会扫描已跟踪文件中的 `sk-...`；scheme 是共享文件，不要把填了 key 的 scheme 提交上去
 - 转写和翻译内容只保存在内存中，不落盘；"复制"功能只在用户主动操作时写入剪贴板
 - `knowledge/` 中真实的会议资料可能涉及保密信息，提交前要确认是否适合进入仓库
 

@@ -18,3 +18,9 @@ xcrun swiftc \
     "$repo_root/Checks/MeetingChecks.swift" \
     -o "$work_dir/checks"
 "$work_dir/checks"
+
+# Fail if anything tracked looks like an OpenAI API key.
+if git -C "$repo_root" grep -nE 'sk-[A-Za-z0-9_-]{20,}' -- . ; then
+    echo "Possible API key in tracked files" >&2
+    exit 1
+fi

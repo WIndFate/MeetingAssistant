@@ -1,91 +1,133 @@
 # Meeting Assistant
 
-Native macOS floating panel for meetings: live on-device transcription of
-system audio, an LLM Chinese translation under every paragraph, and a reply
-hint when someone addresses you by name.
+原生 macOS 浮动面板，在线上会议（Zoom / Teams / Google Meet / 浏览器等）中实时辅助：
 
-## What it does
+- **实时转写**：采集 Mac 播放的会议声音，用 macOS 26 自带的语音识别在本机离线转写日语或英语
+- **逐段翻译**：每说完一两句，就由 LLM 翻译成简体中文，显示在原文下方
+- **点名回答提示**：有人叫到你的名字（如「セキさん」）时弹出提醒，等对方说完后生成"对方在问 / 要点 / 可以这样说"
 
-- Captures everything the Mac plays (Zoom, Teams, Meet, browser) through a
-  CoreAudio Process Tap, excluding itself.
-- Transcribes on-device with macOS 26 `SpeechAnalyzer` / `SpeechTranscriber`
-  (Japanese or English). No extra models, no backend.
-- Translates each finished paragraph into Simplified Chinese with
-  `gpt-5.4-mini`, using the previous three paragraphs as context.
-- When a paragraph contains your name (`セキさん / 石さん / 関さん / 席さん /
-  Seki ...`), it shows a banner (no sound, so nothing leaks into the call),
-  waits for the speaker to pause, and streams a reply hint from `gpt-5.4`:
-  what they are asking, 2-3 points in Chinese, and 1-3 sentences you can say
-  in the meeting language. The hint sees up to the last 12,000 characters of
-  the meeting (about 35 min of Japanese), so "any questions?" after a long
-  talk is answered from the whole talk.
-- `⌘⇧Return` (global) or the speech-bubble button asks for a reply hint at any
-  time. `⌘⇧L` toggles Japanese / English.
+不需要后端服务，不引入第三方依赖或额外的语音模型。
 
-## Requirements
+## 功能说明
 
-- macOS 26+, Xcode 27+
-- An OpenAI API key
+| 功能 | 说明 |
+|---|---|
+| 系统音频采集 | 通过 CoreAudio Process Tap 采集所有 app 播放的声音，自动排除本 app 自身。你自己的麦克风声音不会被采集 |
+| 本机转写 | `SpeechAnalyzer` + `SpeechTranscriber`，完全离线；附带语音活动检测（VAD），静音时不会凭空生成文字 |
+| 自动分段 | 每累计一两句（日语约 40 字 / 英语约 120 字）就在句末切成一段；说话人停顿时也会关段。不会按固定时长从句子中间切开 |
+| 中文翻译 | 默认 `gpt-5.4-mini`，附前 3 段作为上下文，简洁口译风格（去掉口头禅和重复，保留全部实质内容） |
+| 回答提示 | 默认 `gpt-5.4`，参考最近最多 12000 字的会议内容（约日语 35 分钟 / 英语 13 分钟），所以长篇汇报后问「有什么问题吗」也能结合整场内容回答 |
+| 点名检测 | 本地别名匹配，不调用 LLM；只显示顶部横幅，**不播放提示音**，避免通过外放或"共享电脑声音"传到会议里 |
+| 隐身 | 默认开启，面板不出现在屏幕共享和录屏中（`sharingType = .none`，尽力而为，取决于会议软件） |
+| 不抢焦点 | 面板是 non-activating 的，点击它不会让会议 app 失去焦点 |
 
-## Run
+## 系统要求
+
+- macOS 26.0 及以上（`SpeechAnalyzer` 从 macOS 26 开始提供）
+- Xcode 27 及以上
+- OpenAI API key
+
+## 安装与运行
 
 ```bash
-open MeetingAssistant.xcodeproj   # then Run (⌘R)
+git clone https://github.com/WIndFate/MeetingAssistant.git
+cd MeetingAssistant
+open MeetingAssistant.xcodeproj   # 然后在 Xcode 中 Run（⌘R）
 ```
 
-or from the command line:
+也可以用命令行构建：
 
 ```bash
 xcodebuild -project MeetingAssistant.xcodeproj -scheme MeetingAssistant -derivedDataPath .derived-data build
 open .derived-data/Build/Products/Debug/MeetingAssistant.app
 ```
 
-First launch:
+> 签名：工程使用自动签名。用自己的 Apple 账号构建时，请在 Xcode 的 Signing & Capabilities 中把 Team 改成你自己的。
 
-1. Click the gear and paste your OpenAI API key (stored in the login
-   keychain). For development, `OPENAI_API_KEY` in the Xcode scheme also works.
-2. Press play. macOS asks for Speech Recognition and System Audio Recording
-   permission; the on-device speech model downloads once per language.
+### 首次使用
 
-Permission prompts stick more reliably to an app bundle at a fixed path than
-to a DerivedData build that moves around.
+1. 点击齿轮图标，粘贴 OpenAI API key。key 保存在系统钥匙串（Keychain）中。
+2. 点击 ▶ 开始收听。macOS 会请求**语音识别**和**系统音频录制**权限，请在弹窗或「系统设置 › 隐私与安全性」中允许。
+3. 第一次使用某种语言时，系统会下载一次本机语音模型，之后离线可用。
 
-## Settings
+权限绑定在 app 的路径上。把 app 放在固定位置（如 `/Applications`）比每次从会变化的 DerivedData 目录运行更稳定。
 
-| Setting | Default |
+## 使用方法
+
+| 操作 | 方式 |
 |---|---|
-| Translation model | `gpt-5.4-mini` |
-| Reply hint model | `gpt-5.4` |
-| Knowledge folder | `~/Desktop/Meeting/knowledge` |
-| Your name aliases | `セキさん, せきさん, 石さん, 関さん, 席さん, 積さん, seki` |
+| 开始 / 停止收听 | 工具栏 ▶ / ■ |
+| 切换日语 / 英语 | 工具栏语言按钮，或 `⌘⇧L` |
+| 立即生成回答提示 | `⌘⇧Return`（全局快捷键，在会议 app 里也能用），或工具栏气泡按钮 |
+| 隐身开关 | 工具栏眼睛图标；关闭时面板顶部会显示红色警告 |
+| 清空 / 复制记录 | 工具栏垃圾桶 / 复制按钮 |
 
-## Knowledge
+只有提到你的名字时才会自动触发回答提示。对方对所有人提问（如「皆さん、何か質問ありますか」）时，请按 `⌘⇧Return` 手动生成。
 
-Put meeting background (agenda, glossary, facts you can state) in
-`knowledge/*.md`; see `knowledge/README.md`. Edits apply to the next request.
+**建议戴耳机参会。** 外放时会议声音会被你的麦克风再次收进去；共享屏幕时也不要勾选"共享电脑声音"。
 
-## How paragraphs are formed
+## 设置
 
-SpeechTranscriber reports volatile text and then a final result per phrase.
-During continuous speech SpeechTranscriber keeps one growing volatile text
-and may not finalize it for a long time, so paragraphs are cut at the text
-level: as soon as the live text holds a sentence or two (about 40 Japanese /
-120 English characters), everything up to the last sentence end becomes a
-paragraph and is translated. A paragraph also closes when the speaker pauses
-(no recognizer update for 0.6s and the audio quiet for 0.6s). Breaks fall on
-sentence ends; a long monologue is never cut mid-sentence by a timer.
+| 设置项 | 默认值 |
+|---|---|
+| 翻译模型 | `gpt-5.4-mini` |
+| 回答提示模型 | `gpt-5.4` |
+| 知识库文件夹 | `~/Desktop/Meeting/knowledge`（如果仓库放在别处，请在设置中改成实际路径） |
+| 你的名字（别名） | `セキさん, せきさん, 石さん, 関さん, 席さん, 積さん, seki` |
 
-## Checks
+别名用逗号分隔，第一个会作为你的称呼告诉模型。日语别名请带上「さん」，否则「セキュリティ」这类普通词也会被误判为点名。语音识别常把同一个名字写成不同汉字，所以建议把常见的同音写法都列上。
 
-```bash
-./scripts/check.sh
+## 知识库（knowledge/）
+
+`knowledge/` 中的 `*.md` / `*.txt`（按文件名排序，`README*` 除外）会作为会议背景，完整附加到翻译和回答提示的请求中。每次请求都会重新读取，修改后无需重启。
+
+- 适合放：议题、参会人和角色、术语表、项目代号、**语音识别经常认错的词**（例如"現象環境 → 検証環境"）、你可以对外说的事实和数字
+- `instructions.md` 会作为额外规则追加到两套提示词，可以不改代码就调整风格，例如"可以这样说用です/ます体，不超过两句"
+- 内容越多，每次请求的费用越高，只放会影响翻译或回答的信息
+
+⚠️ 真实的会议资料可能涉及保密信息。仓库中的 `knowledge/meeting_context.md` 只是模板；填写真实内容后，提交前请确认是否适合公开。
+
+## 隐私与安全
+
+- **API key 只保存在 macOS 钥匙串**，不写入文件、UserDefaults 或日志，也不会进入本仓库
+- 开发时也可以在 Xcode scheme 中设置环境变量 `OPENAI_API_KEY`。注意：本仓库的 scheme 是共享的（`xcshareddata`），**在 scheme 里填 key 后不要提交该文件**。更推荐直接在 app 设置中填写
+- `./scripts/check.sh` 会扫描所有已跟踪文件，发现疑似 OpenAI key（`sk-...`）就报错
+- 语音在本机识别，**音频不会上传**；发给 OpenAI 的只有转写文本和知识库内容
+- 转写和翻译只保存在内存中，不落盘；只有你点"复制"时才会写入剪贴板
+
+## 工作原理
+
+```text
+系统音频
+  → ProcessTapAudioCaptureService（专用串行音频队列）
+  → AudioFeed（转换为识别器所需格式）
+  → SpeechAnalyzerEngine（SpeechTranscriber + SpeechDetector）
+  → SpeechTranscriptionService（判断停顿，请求 finalize）
+  → TranscriptAssembler（分段规则，纯逻辑）
+  → MeetingViewModel
+       ├─ 新段落 → MeetingPrompts + MeetingKnowledge → OpenAIChatClient → 中文翻译
+       └─ 点名命中（MeetingCallDetector）→ 等待停顿 → OpenAIChatClient → 回答提示
+  → SwiftUI 视图
 ```
 
-Compiles the pure logic (name detection, paragraph assembly, prompts, SSE
-parsing, translation cleanup) with `Checks/MeetingChecks.swift` and runs it.
+分段要点（细节见 `CLAUDE.md` 第 6 节）：
 
-## Stealth
+- 连续讲话时，识别器的临时（volatile）结果会从段首一直累积，可能几十秒都不给最终结果，所以在**文本层面**按句末标点切段，再翻译
+- 停顿判定：识别 0.6s 没有更新**并且**音频已安静 0.6s。之后主动请求 finalize，最终结果大约 50ms 内到达
+- 不在说话中途强制 finalize。实测会把词切断，降低准确率
 
-The eye button sets the window's `sharingType` to `.none` (default on). This is
-best effort: capture stacks built on ScreenCaptureKit may still record it.
-Test with the tools you actually use.
+## 开发
+
+```bash
+./scripts/check.sh   # 纯逻辑检查（分段、点名、提示词、SSE 解析）+ API key 泄漏扫描
+```
+
+开发规范、架构约束和实测结论见 [`CLAUDE.md`](CLAUDE.md)。
+
+## 已知限制
+
+- 只支持日语和英语转写，需要手动切换语言
+- 不区分说话人
+- 不保存录音、不生成会议纪要
+- 隐身依赖系统和会议软件的行为，无法保证在所有共享方式下都有效
+- `SpeechTranscriber` 不支持自定义词汇；专有名词的误识别靠知识库里的术语表，让 LLM 在翻译时纠正
