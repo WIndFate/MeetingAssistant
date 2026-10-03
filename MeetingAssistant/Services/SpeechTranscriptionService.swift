@@ -11,11 +11,13 @@ import Speech
 /// and then asks the analyzer to finalize, closing the paragraph once the
 /// final arrives.
 ///
-/// A recognizer gap alone is not silence: under CPU load the analyzer can go
-/// over a second without an update while someone is still talking, which cut
+/// A recognizer gap alone is not silence: with fastResults the analyzer
+/// updates only about once a second while someone is still talking, which cut
 /// mid-sentence fragments in a real run. Quiet therefore also requires the
 /// audio itself to be quiet; a long gap closes regardless, so a very low
-/// meeting volume cannot keep the last sentence open forever.
+/// meeting volume cannot keep the last sentence open forever. An explicit
+/// finalize returns the final within ~50ms, far sooner than the analyzer's
+/// own endpointing (~2s).
 @MainActor
 final class SpeechTranscriptionService {
     var onStateChange: ((TranscriptionState) -> Void)?
@@ -35,8 +37,10 @@ final class SpeechTranscriptionService {
     private var finalizeFallbackTask: Task<Void, Never>?
     private var awaitingQuietCommit = false
 
-    // Volatile results stream every few hundred ms while someone talks.
-    private let quietInterval: Duration = .milliseconds(1200)
+    // Volatile results arrive in bursts about once a second while someone
+    // talks, so a recognizer gap is a weak signal; quiet audio is the real
+    // one. Check soon after each update and let the audio gate decide.
+    private let quietInterval: Duration = .milliseconds(600)
     private let audioQuietSeconds: TimeInterval = 0.6
     // A gap this long closes the paragraph even if the audio is not quiet.
     private let forcedQuietGap: TimeInterval = 3.0

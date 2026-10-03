@@ -42,7 +42,8 @@ final class MeetingViewModel: ObservableObject {
     private let hintParagraphLimit = 30
     private let hintCharacterLimit = 2400
     // The question usually follows the name; fire once the speaker pauses.
-    private let callSettleDelay: Duration = .milliseconds(700)
+    // A closed paragraph already implies a pause, so this only debounces.
+    private let callSettleDelay: Duration = .milliseconds(300)
     // A paragraph that is little more than "セキさん、" was cut at a breath
     // before the actual question; give the rest a moment to arrive.
     private let shortCallParagraphLength = 10

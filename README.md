@@ -69,7 +69,7 @@ and may not finalize it for a long time, so paragraphs are cut at the text
 level: as soon as the live text holds a sentence or two (about 40 Japanese /
 120 English characters), everything up to the last sentence end becomes a
 paragraph and is translated. A paragraph also closes when the speaker pauses
-(no recognizer update for 1.2s and the audio quiet for 0.6s). Breaks fall on
+(no recognizer update for 0.6s and the audio quiet for 0.6s). Breaks fall on
 sentence ends; a long monologue is never cut mid-sentence by a timer.
 
 ## Checks
