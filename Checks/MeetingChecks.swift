@@ -117,5 +117,11 @@ struct MeetingChecks {
         precondition(user == "Source language: Japanese\nCONTEXT:\n前の話\nTARGET:\n来週です")
         let hint = MeetingPrompts.hintUser(transcript: ["一つ目", "セキさん、どう？"], language: .japanese, userName: "セキさん")
         precondition(hint.contains("addressed as: セキさん") && hint.hasSuffix("- セキさん、どう？"))
+
+        // Hint context keeps the newest paragraphs within the character cap.
+        precondition(MeetingPrompts.hintTranscript(["aaaa", "bb", "cc"], characterLimit: 4) == ["bb", "cc"])
+        precondition(MeetingPrompts.hintTranscript(["aaaa", "bb", "cc"], characterLimit: 100) == ["aaaa", "bb", "cc"])
+        precondition(MeetingPrompts.hintTranscript(["old", "a very long latest paragraph"], characterLimit: 5) == ["a very long latest paragraph"])
+        precondition(MeetingPrompts.hintTranscript([], characterLimit: 5).isEmpty)
     }
 }

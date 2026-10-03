@@ -37,10 +37,11 @@ final class MeetingViewModel: ObservableObject {
     // re-renders the list, so streamed text is pushed at most ~16 times/s.
     private static let renderInterval: TimeInterval = 0.06
     private let translationContextCount = 3
-    // Paragraphs are only a sentence or two; the character cap is what
-    // actually bounds the hint context.
-    private let hintParagraphLimit = 30
-    private let hintCharacterLimit = 2400
+    // "Any questions?" at the end of a long talk needs the whole talk, so
+    // the hint gets the newest paragraphs up to this many characters:
+    // about 35 min of Japanese or 13 min of English speech, at most ~12k
+    // tokens. Hints are rare, so the extra input cost is small.
+    private let hintCharacterLimit = 12_000
     // The question usually follows the name; fire once the speaker pauses.
     // A closed paragraph already implies a pause, so this only debounces.
     private let callSettleDelay: Duration = .milliseconds(300)
@@ -237,10 +238,7 @@ final class MeetingViewModel: ObservableObject {
         guard !paragraphs.isEmpty, turns.count == paragraphs.count else { return }
         handledCallThroughIndex = paragraphs.count - 1
 
-        var transcript = Array(paragraphs.suffix(hintParagraphLimit))
-        while transcript.count > 1, transcript.joined().count > hintCharacterLimit {
-            transcript.removeFirst()
-        }
+        let transcript = MeetingPrompts.hintTranscript(paragraphs, characterLimit: hintCharacterLimit)
         // The hint attaches to the latest paragraph.
         let index = turns.count - 1
         if !turns[index].hint.isEmpty {

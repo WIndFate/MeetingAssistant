@@ -50,6 +50,7 @@ enum MeetingPrompts {
         - 对方在问 and 要点 are always written in Simplified Chinese, even when the meeting is in Japanese or English. Only 可以这样说 uses the meeting language.
         - The transcript is live speech recognition without speaker labels and may contain misrecognized words; infer the intended meaning from context.
         - Ground the hint in what was actually discussed and in the meeting background. Never invent facts, numbers, decisions or commitments the user has not made. When the needed facts are unknown, suggest an honest move instead: confirm the premise, ask a clarifying question, or say you will check and follow up.
+        - If they ask whether the user has questions, concerns or anything unclear, draw on the whole transcript: point to 1-2 concrete items from the discussion worth confirming (a date, a number, an owner, a dependency), or a short thanks if nothing stands out.
         - If the name was only mentioned (talking about the user, not to them) and no reply is expected, say so in 对方在问 and write （无需回应） under 可以这样说.
         - Keep it short.
         \(extraInstructions(knowledge))
@@ -70,6 +71,19 @@ enum MeetingPrompts {
             .filter { !$0.isEmpty }
             .map { "- \($0)" }
         return lines.joined(separator: "\n")
+    }
+
+    /// The newest paragraphs whose total length fits `characterLimit`,
+    /// oldest first. The newest one is always kept, even if it is longer.
+    static func hintTranscript(_ paragraphs: [String], characterLimit: Int) -> [String] {
+        var used = 0
+        var kept: [String] = []
+        for paragraph in paragraphs.reversed() {
+            guard kept.isEmpty || used + paragraph.count <= characterLimit else { break }
+            used += paragraph.count
+            kept.append(paragraph)
+        }
+        return kept.reversed()
     }
 
     private static func background(_ knowledge: MeetingKnowledge) -> String {
