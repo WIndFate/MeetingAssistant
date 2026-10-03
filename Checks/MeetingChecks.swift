@@ -148,7 +148,8 @@ struct MeetingChecks {
         turn.hint = "新提示"
         let entries = MeetingRecord.entries(from: [turn, MeetingTurn(text: "はい")])
         precondition(entries[0] == MeetingRecord.Entry(text: "来週です", translation: "下周。", hints: ["旧提示", "新提示"]))
-        precondition(MeetingRecord.plainText(entries) == "Speaker: 来週です\n中文: 下周。\nHint: 旧提示\nHint: 新提示\n\nSpeaker: はい")
+        // Copy is the original speech only: no translations or hints.
+        precondition(MeetingRecord.plainText(entries) == "来週です\nはい")
 
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-history-\(UUID().uuidString)", isDirectory: true)
@@ -171,7 +172,7 @@ struct MeetingChecks {
         precondition(decoded == MeetingRecord.Entry(text: "はい", translation: "好", hints: []) && !decoded.isMine)
         var mine = MeetingTurn(text: "了解です", isMine: true)
         mine.translation = "明白。"
-        precondition(MeetingRecord.plainText(MeetingRecord.entries(from: [mine])) == "Me: 了解です\n中文: 明白。")
+        precondition(MeetingRecord.plainText(MeetingRecord.entries(from: [mine] + [MeetingTurn(text: "どうですか")])) == "我：了解です\nどうですか")
 
         let loaded = MeetingHistoryStore.loadAll(from: folder)
         precondition(loaded == [newer, older], "History must round-trip newest first")

@@ -25,15 +25,13 @@ struct MeetingRecord: Codable, Identifiable, Equatable {
         }
     }
 
-    /// Plain-text export used by Copy in both the panel and the history window.
+    /// Copy in the panel and the history window: the original speech only,
+    /// one paragraph per line, without translations or reply hints. The
+    /// user's own lines are marked so the conversation stays readable.
     static func plainText(_ entries: [Entry]) -> String {
-        entries.map { entry in
-            var lines = ["\(entry.isMine ? "Me" : "Speaker"): \(entry.text)"]
-            if !entry.translation.isEmpty { lines.append("中文: \(entry.translation)") }
-            lines += entry.hints.map { "Hint: \($0)" }
-            return lines.joined(separator: "\n")
-        }
-        .joined(separator: "\n\n")
+        entries
+            .map { $0.isMine ? "我：\($0.text)" : $0.text }
+            .joined(separator: "\n")
     }
 
     func contains(_ query: String) -> Bool {
