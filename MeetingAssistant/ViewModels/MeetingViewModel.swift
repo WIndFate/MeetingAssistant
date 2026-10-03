@@ -1,4 +1,4 @@
-import AppKit
+import Combine
 import Foundation
 
 /// Live text of the paragraph being spoken. Separate object so ~5 partial
@@ -100,7 +100,7 @@ final class MeetingViewModel: ObservableObject {
         Task {
             await transcription.commitLiveText()
             guard !turns.isEmpty else {
-                showCallAlert("无可回答内容", playsSound: false)
+                showCallAlert("无可回答内容")
                 return
             }
             requestHint(reason: "manual")
@@ -141,7 +141,7 @@ final class MeetingViewModel: ObservableObject {
         }
 
         if callAlertText == nil, MeetingCallDetector.containsCall(state.partialTranscript, aliases: settings.aliases) {
-            showCallAlert("被点名了 · 等对方说完", playsSound: true)
+            showCallAlert("被点名了 · 等对方说完")
         }
         scheduleCallCheck()
     }
@@ -249,7 +249,7 @@ final class MeetingViewModel: ObservableObject {
         }
         turns[index].isHintStreaming = true
         let turnID = turns[index].id
-        showCallAlert(reason == "manual" ? "生成回答提示中" : "被点名了 · 生成回答提示中", playsSound: callAlertText == nil)
+        showCallAlert(reason == "manual" ? "生成回答提示中" : "被点名了 · 生成回答提示中")
 
         let knowledge = MeetingKnowledge.load(from: settings.knowledgeFolderURL)
         let system = MeetingPrompts.hintSystem(knowledge)
@@ -301,12 +301,11 @@ final class MeetingViewModel: ObservableObject {
         mutate(&turns[index])
     }
 
-    private func showCallAlert(_ text: String, playsSound: Bool) {
+    // Visual only: a chime plays through the system output, where a
+    // speakerphone mic or "share computer sound" would send it to the meeting.
+    private func showCallAlert(_ text: String) {
         callAlertTask?.cancel()
         callAlertText = text
-        if playsSound {
-            NSSound(named: "Glass")?.play()
-        }
         // Safety net: never leave the banner up if no hint follows.
         callAlertTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))

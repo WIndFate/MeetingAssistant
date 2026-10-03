@@ -13,7 +13,7 @@ hint when someone addresses you by name.
 - Translates each finished paragraph into Simplified Chinese with
   `gpt-5.4-mini`, using the previous three paragraphs as context.
 - When a paragraph contains your name (`セキさん / 石さん / 関さん / 席さん /
-  Seki ...`), it chimes, waits for the speaker to pause, and streams a reply
+  Seki ...`), it shows a banner (no sound), waits for the speaker to pause, and streams a reply
   hint from `gpt-5.4`: what they are asking, 2-3 points in Chinese, and 1-3
   sentences you can say in the meeting language.
 - `⌘⇧Return` (global) or the speech-bubble button asks for a reply hint at any
