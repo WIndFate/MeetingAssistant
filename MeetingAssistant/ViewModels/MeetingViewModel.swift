@@ -256,7 +256,8 @@ final class MeetingViewModel: ObservableObject {
         while count < paragraphs.count {
             turns.append(MeetingTurn(text: paragraphs[count], isMine: isMine))
             count += 1
-            translate(turnAt: turns.count - 1)
+            // The user knows what they said; only the other side is translated.
+            if !isMine { translate(turnAt: turns.count - 1) }
         }
     }
 
