@@ -18,8 +18,11 @@ import SwiftUI
 // bubble churn had already invalidated, stranding the viewport in blank space
 // below the content.
 //
-// `.alignment` deliberately keeps its default so a conversation shorter than
-// the viewport still reads from the top.
+// `.alignment` must be bottom too. With the default top alignment, the
+// moment the conversation first outgrows the viewport the LazyVStack is
+// left at offset 0 and pinning never engages; a harness streaming paragraphs
+// and translations drifted 1000pt off the bottom within 40s. A short
+// conversation therefore sits at the bottom, as in a chat app.
 struct FollowBottomScrollView<Content: View>: View {
     private let content: () -> Content
 
@@ -36,5 +39,6 @@ struct FollowBottomScrollView<Content: View>: View {
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .defaultScrollAnchor(.bottom, for: .alignment)
     }
 }

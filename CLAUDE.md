@@ -156,7 +156,7 @@ scripts/check.sh                   纯逻辑检查脚本
 - 原则是低干扰、高密度、一眼能读完；工具栏保持单行，如果新增元素会降低读取效率就不加
 - 对话采用 iMessage / LINE 风格：发言是左侧灰色气泡，回答提示是右侧蓝色气泡；气泡宽度随内容自适应，最多占可用宽度的 78%，随窗口变宽而变宽，禁止写死最大宽度；不显示 Speaker 这类角色标签
 - 中文翻译属于原文的附属信息，放在发言气泡内的原文下方，用细线分隔。细线用 overlay 绘制，不能用 `Divider`：`Divider` 会撑满宽度，把每个气泡都拉到最大宽
-- 自动滚动只用原生的 `defaultScrollAnchor(.bottom, ...)`（见 `FollowBottomScrollView`），禁止手写 `scrollTo` 来跟随底部
+- 自动滚动只用原生的 `defaultScrollAnchor(.bottom, ...)`（见 `FollowBottomScrollView`），禁止手写 `scrollTo` 来跟随底部；`.initialOffset`、`.sizeChanges`、`.alignment` 三个角色都必须设为 `.bottom`，缺少 `.alignment` 时内容第一次超出视口后就不再跟随
 - 滚动容器外的条件性元素（如生成中的 `ProgressView`）必须常驻布局、用 opacity 隐藏；条件插入会改变容器高度，导致贴底失效
 - partial 文本由独立的 `LiveTranscript` 对象驱动，避免每次 partial 更新都重绘整个列表
 - 面板是 non-activating 的，点击不会抢走会议 app 的焦点；隐身默认开启（`sharingType = .none`，属于尽力而为）
