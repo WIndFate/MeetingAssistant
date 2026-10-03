@@ -45,11 +45,15 @@ final class SpeechAnalyzerEngine {
             try await installation.downloadAndInstall()
         }
 
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+        // SpeechDetector (VAD) keeps the transcriber off non-speech audio:
+        // without it, a finalize followed by silence reliably produced a
+        // phantom "はい。" final in testing.
+        let modules: [any SpeechModule] = [transcriber, SpeechDetector()]
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules) else {
             throw SpeechEngineError.noAudioFormat
         }
         let (inputSequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let analyzer = SpeechAnalyzer(modules: modules)
 
         resultsTask = Task { [weak self] in
             do {
