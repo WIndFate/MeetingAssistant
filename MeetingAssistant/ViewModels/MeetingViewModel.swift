@@ -35,8 +35,11 @@ final class MeetingViewModel: ObservableObject {
     private var micParagraphCount = 0
     private var translationTasks: [MeetingTurn.ID: Task<Void, Never>] = [:]
     private var hintTask: Task<Void, Never>?
-    // Name calls in turns at or below this index have been answered.
+    // Turns at or below this index have been answered by a hint.
     private var handledCallThroughIndex = -1
+    // Set by a name call: every later paragraph from the other side gets a
+    // hint until the hint says the exchange moved on, or the window runs out.
+    private var followUpSince: Date?
     private var callCheckTask: Task<Void, Never>?
     private var shortCallGraceIndex: Int?
     private var callAlertTask: Task<Void, Never>?
@@ -64,6 +67,10 @@ final class MeetingViewModel: ObservableObject {
     // before the actual question; give the rest a moment to arrive.
     private let shortCallParagraphLength = 10
     private let shortCallGraceDelay: Duration = .milliseconds(1500)
+    // Each follow-up is a full hint request; if the model never says the
+    // exchange moved on, follow-ups stop this long after the name call.
+    // ponytail: fixed window since the last name call; a fresh call restarts it.
+    private let followUpWindow: TimeInterval = 300
     // Saves are throttled, not debounced: a busy meeting streams changes
     // continuously, so a debounce could postpone the write indefinitely.
     // At most this much is lost if the app crashes.
@@ -150,6 +157,7 @@ final class MeetingViewModel: ObservableObject {
         hintTask?.cancel()
         hintTask = nil
         handledCallThroughIndex = -1
+        followUpSince = nil
         cancelShortCallGrace()
         clearCallAlert()
         turns = []
@@ -201,7 +209,10 @@ final class MeetingViewModel: ObservableObject {
         if isListening != state.isListening {
             isListening = state.isListening
             // Also when the system side fails: the mic follows listening.
-            if !state.isListening { myTranscription.stop() }
+            if !state.isListening {
+                myTranscription.stop()
+                followUpSince = nil
+            }
         }
         if statusText != state.statusText { statusText = state.statusText }
         syncError()
@@ -330,7 +341,7 @@ final class MeetingViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Name call → reply hint
+    // MARK: - Name call / follow-up → reply hint
 
     private func scheduleCallCheck() {
         callCheckTask?.cancel()
@@ -344,13 +355,23 @@ final class MeetingViewModel: ObservableObject {
 
     private func requestHintIfCallSettled() {
         let firstUnhandled = handledCallThroughIndex + 1
-        guard firstUnhandled < turns.count,
-              let callIndex = (firstUnhandled..<turns.count).last(where: {
-                  !turns[$0].isMine && MeetingCallDetector.containsCall(turns[$0].text, aliases: settings.aliases)
-              })
-        else { return }
+        guard firstUnhandled < turns.count else { return }
+        let unhandled = firstUnhandled..<turns.count
+        if let since = followUpSince, Date().timeIntervalSince(since) > followUpWindow {
+            followUpSince = nil
+            print("[MeetingViewModel] follow-up end reason=window")
+        }
+        let callIndex = unhandled.last(where: {
+            !turns[$0].isMine && MeetingCallDetector.containsCall(turns[$0].text, aliases: settings.aliases)
+        })
+        let needsFollowUp = followUpSince != nil && unhandled.contains(where: { !turns[$0].isMine })
+        guard callIndex != nil || needsFollowUp else { return }
         // Still talking: the question is not finished yet.
         guard transcription.state.partialTranscript.count < 2 else { return }
+        guard let callIndex else {
+            requestHint(reason: "follow_up")
+            return
+        }
 
         let lastRemoteIndex = turns.lastIndex(where: { !$0.isMine })
         let callText = turns[callIndex].text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -376,6 +397,8 @@ final class MeetingViewModel: ObservableObject {
         cancelShortCallGrace()
         guard !turns.isEmpty else { return }
         handledCallThroughIndex = turns.count - 1
+        if reason == "name_call" { followUpSince = Date() }
+        let isFollowUp = reason == "follow_up"
 
         let transcript = MeetingPrompts.hintTranscript(
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
@@ -389,14 +412,19 @@ final class MeetingViewModel: ObservableObject {
         }
         turns[index].isHintStreaming = true
         let turnID = turns[index].id
-        showCallAlert(reason == "manual" ? "生成回答提示中" : "被点名了 · 生成回答提示中")
+        switch reason {
+        case "manual": showCallAlert("生成回答提示中")
+        case "follow_up": showCallAlert("跟进对话 · 生成回答提示中")
+        default: showCallAlert("被点名了 · 生成回答提示中")
+        }
 
         let knowledge = MeetingKnowledge.load(from: settings.knowledgeFolderURL)
         let system = MeetingPrompts.hintSystem(knowledge)
         let user = MeetingPrompts.hintUser(
             transcript: transcript,
             language: language,
-            userName: settings.aliases.first ?? ""
+            userName: settings.aliases.first ?? "",
+            isFollowUp: isFollowUp
         )
         print("[MeetingViewModel] hint request reason=\(reason) paragraphs=\(transcript.count)")
 
@@ -419,6 +447,14 @@ final class MeetingViewModel: ObservableObject {
                     self.updateTurn(turnID) { $0.hint = text }
                 }
                 self.updateTurn(turnID) { $0.hint = text }
+                if MeetingPrompts.endsFollowUp(text), self.followUpSince != nil {
+                    self.followUpSince = nil
+                    print("[MeetingViewModel] follow-up end reason=moved_on")
+                }
+                // Nothing for the user to say: drop the bubble, keep any earlier hint.
+                if text.contains(MeetingPrompts.conversationMovedOnMarker) {
+                    self.updateTurn(turnID) { $0.hint = $0.archivedHints.popLast() ?? "" }
+                }
             } catch {
                 if !Task.isCancelled {
                     self.updateTurn(turnID) { $0.hint = "Reply hint failed: \(error.localizedDescription)" }

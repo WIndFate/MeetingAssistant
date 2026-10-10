@@ -59,7 +59,7 @@ enum MeetingPrompts {
 
     static func hintSystem(_ knowledge: MeetingKnowledge) -> String {
         """
-        You are a discreet real-time meeting coach for the user, a Chinese software engineer who works in Japanese (sometimes English) but is not a native speaker. Someone in the meeting has just addressed the user by name, or the user asked for help. From the recent transcript, work out what they want from the user (an opinion, a status update, an answer, a confirmation, a decision) and give a hint the user can read in a few seconds and say out loud right away.
+        You are a discreet real-time meeting coach for the user, a Chinese software engineer who works in Japanese (sometimes English) but is not a native speaker. Someone in the meeting has just addressed the user by name, or the user asked for help, or the other side has said more in an exchange with the user that is still going on. From the recent transcript, work out what they want from the user (an opinion, a status update, an answer, a confirmation, a decision) and give a hint the user can read in a few seconds and say out loud right away.
 
         Output exactly this plain-text layout, no markdown headings:
         对方在问：<one short Chinese sentence>
@@ -73,7 +73,7 @@ enum MeetingPrompts {
 
         可以这样说 is spoken, not written:
         - Write it the way a colleague would actually say it in this meeting, out loud: short sentences, everyday words, natural spoken flow. It must not read like an email or a document.
-        - Japanese: polite です/ます spoken register, the way people talk in internal meetings. A light natural opener is fine (そうですね、/ はい、/ 確認なんですが、). Avoid written or stiff forms: である, 〜につきましては, 〜の件に関しまして, 〜いたしかねます, piled-up keigo such as 〜させていただきたく存じます. Prefer 〜と思います, 〜です, 〜できます, 〜してもいいですか.
+        - Japanese: polite です/ます spoken register, the way Japanese colleagues actually talk in internal meetings. A light natural opener is fine (そうですね、/ はい、/ あ、/ 確認なんですが、). Use the soft spoken patterns natives use: 〜んですけど, 〜ですかね, 〜って感じです, ちょっと, とりあえず, 〜ってことですよね. Avoid written or stiff forms: である, 〜につきましては, 〜の件に関しまして, 〜いたしかねます, piled-up keigo such as 〜させていただきたく存じます. Prefer 〜と思います, 〜です, 〜できます, 〜してもいいですか.
         - English: conversational, with contractions (I'll, we're, that's), plain words, no formal email phrasing (Please be advised, Kindly, As per).
         - Keep each sentence short and easy for a non-native speaker to pronounce; at most about 40 Japanese characters or 20 English words per sentence. Prefer common words over rare kanji compounds.
         - Answer first, then the reason or next step.
@@ -84,27 +84,51 @@ enum MeetingPrompts {
         - If they ask whether the user has questions, concerns or anything unclear, draw on the whole transcript: point to 1-2 concrete items worth confirming (a date, a number, an owner, a dependency), or a short thanks if nothing stands out.
         - If the name was only mentioned (talking about the user, not to them) and no reply is expected, say so in 对方在问 and write （无需回应） under 可以这样说.
 
+        Follow-up requests (the user message says when a request is one):
+        - The user was addressed earlier and the exchange may still be going on. Lines after the user's last reply are new; respond to the newest lines from the other side.
+        - A new question: answer it as usual. An instruction or request (please do X, check Y): confirm it back briefly and, if something needed is missing (deadline, scope, owner), ask about it. An explanation aimed at the user: a short natural reaction that shows understanding or asks one useful question, never a long speech.
+        - 对方在问 then says what the other side just said or wants, e.g. 对方让你整理 API 规格 / 对方在解释原因，不需要表态.
+        - If the newest lines are aimed at someone else (another person's name, 〜さんはどうですか to someone else), or the discussion has moved on to a topic that no longer needs the user, output only （对话已转移） and nothing else. When unsure whether it is still the user's turn, keep coaching.
+
         Example of the register for 可以这样说 (Japanese):
         - Stiff, do not write like this: 本件につきましては、バックエンド側の対応状況を確認の上、改めてご連絡させていただきたく存じます。
         - Spoken, write like this: バックエンドの状況、まだ確認できてないので、今日中に確認してご連絡しますね。
+        - Stiff: ご指示いただいた内容について承知いたしました。対応させていただきます。
+        - Spoken: はい、分かりました。いつまでにやればいいですか？
+        - Stiff: ご説明いただきありがとうございます。理解いたしました。
+        - Spoken: なるほど、だから先にDBの方を直すってことですね。
         \(extraInstructions(knowledge))
         [MEETING BACKGROUND]
         \(background(knowledge))
         """
     }
 
-    static func hintUser(transcript: [String], language: TranscriptionLanguage, userName: String) -> String {
+    static func hintUser(transcript: [String], language: TranscriptionLanguage, userName: String, isFollowUp: Bool) -> String {
         var lines = ["Meeting language: \(language.promptName)"]
         let name = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !name.isEmpty {
             lines.append("The user is addressed as: \(name)")
         }
-        lines.append("Recent transcript (oldest first; [Me] marks the user's own words; the user was addressed near the end):")
+        if isFollowUp {
+            lines.append("This is a follow-up request: the user was addressed earlier; coach on the newest lines, or output only \(conversationMovedOnMarker) if the exchange has moved away from the user.")
+            lines.append("Recent transcript (oldest first; [Me] marks the user's own words):")
+        } else {
+            lines.append("Recent transcript (oldest first; [Me] marks the user's own words; the user was addressed near the end):")
+        }
         lines += transcript
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .map { "- \($0)" }
         return lines.joined(separator: "\n")
+    }
+
+    /// The hint's answer when the exchange has moved on to someone else.
+    static let conversationMovedOnMarker = "（对话已转移）"
+    private static let noReplyMarker = "（无需回应）"
+
+    /// Follow-ups stop once the hint says the user is no longer being talked to.
+    static func endsFollowUp(_ hint: String) -> Bool {
+        hint.contains(conversationMovedOnMarker) || hint.contains(noReplyMarker)
     }
 
     static func hintLine(_ text: String, isMine: Bool) -> String {
