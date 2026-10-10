@@ -25,8 +25,7 @@ final class MeetingViewModel: ObservableObject {
     /// Also transcribe the user's microphone. Off on every launch.
     @Published private(set) var isMicEnabled = false
     // Set by a name call or a manual hint: every later paragraph from the
-    // other side gets a hint until the hint says the exchange moved on, the
-    // user stops it, or the window runs out.
+    // other side gets a hint until the user stops it or the window runs out.
     @Published private(set) var followUpSince: Date?
     var isFollowingUp: Bool { followUpSince != nil }
 
@@ -69,9 +68,9 @@ final class MeetingViewModel: ObservableObject {
     // before the actual question; give the rest a moment to arrive.
     private let shortCallParagraphLength = 10
     private let shortCallGraceDelay: Duration = .milliseconds(1500)
-    // Each follow-up is a full hint request; if the model never says the
-    // exchange moved on, follow-ups stop this long after the name call or
-    // manual hint that started them.
+    // Each follow-up is a full hint request; if the user forgets to stop,
+    // follow-ups end this long after the name call or manual hint that
+    // started them.
     // ponytail: fixed window since the last call; a fresh call restarts it.
     private let followUpWindow: TimeInterval = 300
     // Saves are throttled, not debounced: a busy meeting streams changes
@@ -183,8 +182,8 @@ final class MeetingViewModel: ObservableObject {
         }
     }
 
-    /// Toolbar hint button: while following up it ends the follow-up (for
-    /// when the model misses that the talk moved on), otherwise hint now.
+    /// Toolbar hint button: while following up it ends the follow-up,
+    /// otherwise hint now.
     func toggleFollowUp() {
         guard isFollowingUp else {
             requestHintNow()
@@ -461,14 +460,6 @@ final class MeetingViewModel: ObservableObject {
                     self.updateTurn(turnID) { $0.hint = text }
                 }
                 self.updateTurn(turnID) { $0.hint = text }
-                if MeetingPrompts.endsFollowUp(text), self.followUpSince != nil {
-                    self.followUpSince = nil
-                    print("[MeetingViewModel] follow-up end reason=moved_on")
-                }
-                // Nothing for the user to say: drop the bubble, keep any earlier hint.
-                if text.contains(MeetingPrompts.conversationMovedOnMarker) {
-                    self.updateTurn(turnID) { $0.hint = $0.archivedHints.popLast() ?? "" }
-                }
             } catch {
                 if !Task.isCancelled {
                     self.updateTurn(turnID) { $0.hint = "Reply hint failed: \(error.localizedDescription)" }

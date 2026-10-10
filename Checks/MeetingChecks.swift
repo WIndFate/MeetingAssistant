@@ -130,13 +130,9 @@ struct MeetingChecks {
         precondition(user == "Source language: Japanese\nCONTEXT:\n前の話\nTARGET:\n来週です\nTranslate TARGET into Simplified Chinese.")
         let hint = MeetingPrompts.hintUser(transcript: ["一つ目", "セキさん、どう？"], language: .japanese, userName: "セキさん", isFollowUp: false)
         precondition(hint.contains("addressed as: セキさん") && hint.hasSuffix("- セキさん、どう？") && !hint.contains("follow-up"))
-        // Follow-ups tell the model how to end the exchange, in both prompts.
         let followUp = MeetingPrompts.hintUser(transcript: ["じゃあ仕様まとめてもらえますか"], language: .japanese, userName: "セキさん", isFollowUp: true)
-        precondition(followUp.contains("follow-up") && followUp.contains(MeetingPrompts.conversationMovedOnMarker))
-        precondition(MeetingPrompts.hintSystem(knowledge).contains(MeetingPrompts.conversationMovedOnMarker))
-        precondition(MeetingPrompts.endsFollowUp("（对话已转移）"))
-        precondition(MeetingPrompts.endsFollowUp("对方在问：在说你\n可以这样说：\n（无需回应）"))
-        precondition(!MeetingPrompts.endsFollowUp("对方在问：截止日期？\n可以这样说：\n金曜日でどうですか？"))
+        precondition(followUp.contains("follow-up") && followUp.hasSuffix("- じゃあ仕様まとめてもらえますか"))
+        precondition(MeetingPrompts.hintSystem(knowledge).contains("Follow-up requests"))
 
         // Hint context keeps the newest paragraphs within the character cap.
         precondition(MeetingPrompts.hintTranscript(["aaaa", "bb", "cc"], characterLimit: 4) == ["bb", "cc"])
