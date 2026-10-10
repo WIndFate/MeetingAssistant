@@ -37,9 +37,8 @@ final class MeetingViewModel: ObservableObject {
     private var systemParagraphCount = 0
     private var micParagraphCount = 0
     private var translationTasks: [MeetingTurn.ID: Task<Void, Never>] = [:]
-    private var hintTask: Task<Void, Never>?
-    // The turn whose hint `hintTask` is streaming into.
-    private var hintTurnID: MeetingTurn.ID?
+    // One hint per turn; hints for different turns stream side by side.
+    private var hintTasks: [MeetingTurn.ID: Task<Void, Never>] = [:]
     // Turns at or below this index have been answered by a hint.
     private var handledCallThroughIndex = -1
     private var callCheckTask: Task<Void, Never>?
@@ -152,9 +151,8 @@ final class MeetingViewModel: ObservableObject {
         record = nil
         translationTasks.values.forEach { $0.cancel() }
         translationTasks = [:]
-        hintTask?.cancel()
-        hintTask = nil
-        hintTurnID = nil
+        hintTasks.values.forEach { $0.cancel() }
+        hintTasks = [:]
         handledCallThroughIndex = -1
         isFollowingUp = false
         cancelShortCallGrace()
@@ -410,21 +408,20 @@ final class MeetingViewModel: ObservableObject {
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
             characterLimit: hintCharacterLimit
         )
-        // Follow-ups make superseding a streaming hint routine; drop the cut-off
-        // fragment instead of leaving half an answer under the older turn.
-        hintTask?.cancel()
-        if let hintTurnID {
-            updateTurn(hintTurnID) { $0.hint = ""; $0.isHintStreaming = false }
-        }
         // The hint answers the other side, so it hangs under their latest turn.
         let index = turns.lastIndex(where: { !$0.isMine }) ?? turns.count - 1
-        if !turns[index].hint.isEmpty {
+        let turnID = turns[index].id
+        // Earlier hints keep streaming: a fast speaker's next pause must not
+        // wait for, or cancel, the previous answer. Only a repeat on the same
+        // turn replaces the hint still streaming there.
+        if let running = hintTasks[turnID] {
+            running.cancel()
+            turns[index].hint = ""
+        } else if !turns[index].hint.isEmpty {
             turns[index].archivedHints.append(turns[index].hint)
             turns[index].hint = ""
         }
         turns[index].isHintStreaming = true
-        let turnID = turns[index].id
-        hintTurnID = turnID
         switch reason {
         case "manual": showCallAlert("生成回答提示中")
         case "follow_up": showCallAlert("跟进对话 · 生成回答提示中")
@@ -441,7 +438,7 @@ final class MeetingViewModel: ObservableObject {
         )
         print("[MeetingViewModel] hint request reason=\(reason) paragraphs=\(transcript.count)")
 
-        hintTask = Task { [weak self] in
+        hintTasks[turnID] = Task { [weak self] in
             guard let self else { return }
             do {
                 var text = ""
@@ -453,12 +450,13 @@ final class MeetingViewModel: ObservableObject {
                     maxTokens: 900,
                     temperature: 0.4
                 ) {
+                    // A repeat request on this turn has taken it over.
+                    guard !Task.isCancelled else { return }
                     text += delta
                     guard Date().timeIntervalSince(lastRender) >= Self.renderInterval else { continue }
                     lastRender = Date()
                     self.updateTurn(turnID) { $0.hint = text }
                 }
-                // The superseding request already reset this turn and owns the banner.
                 guard !Task.isCancelled else { return }
                 self.updateTurn(turnID) { $0.hint = text }
             } catch {
@@ -471,8 +469,8 @@ final class MeetingViewModel: ObservableObject {
                 }
             }
             self.updateTurn(turnID) { $0.isHintStreaming = false }
-            self.hintTurnID = nil
-            self.clearCallAlert()
+            self.hintTasks[turnID] = nil
+            if !self.isAnyHintStreaming { self.clearCallAlert() }
         }
     }
 
