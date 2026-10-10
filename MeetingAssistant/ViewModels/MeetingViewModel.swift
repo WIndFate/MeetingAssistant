@@ -38,6 +38,8 @@ final class MeetingViewModel: ObservableObject {
     private var micParagraphCount = 0
     private var translationTasks: [MeetingTurn.ID: Task<Void, Never>] = [:]
     private var hintTask: Task<Void, Never>?
+    // The turn whose hint `hintTask` is streaming into.
+    private var hintTurnID: MeetingTurn.ID?
     // Turns at or below this index have been answered by a hint.
     private var handledCallThroughIndex = -1
     private var callCheckTask: Task<Void, Never>?
@@ -152,6 +154,7 @@ final class MeetingViewModel: ObservableObject {
         translationTasks = [:]
         hintTask?.cancel()
         hintTask = nil
+        hintTurnID = nil
         handledCallThroughIndex = -1
         isFollowingUp = false
         cancelShortCallGrace()
@@ -407,6 +410,12 @@ final class MeetingViewModel: ObservableObject {
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
             characterLimit: hintCharacterLimit
         )
+        // Follow-ups make superseding a streaming hint routine; drop the cut-off
+        // fragment instead of leaving half an answer under the older turn.
+        hintTask?.cancel()
+        if let hintTurnID {
+            updateTurn(hintTurnID) { $0.hint = ""; $0.isHintStreaming = false }
+        }
         // The hint answers the other side, so it hangs under their latest turn.
         let index = turns.lastIndex(where: { !$0.isMine }) ?? turns.count - 1
         if !turns[index].hint.isEmpty {
@@ -415,6 +424,7 @@ final class MeetingViewModel: ObservableObject {
         }
         turns[index].isHintStreaming = true
         let turnID = turns[index].id
+        hintTurnID = turnID
         switch reason {
         case "manual": showCallAlert("生成回答提示中")
         case "follow_up": showCallAlert("跟进对话 · 生成回答提示中")
@@ -431,7 +441,6 @@ final class MeetingViewModel: ObservableObject {
         )
         print("[MeetingViewModel] hint request reason=\(reason) paragraphs=\(transcript.count)")
 
-        hintTask?.cancel()
         hintTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -449,13 +458,20 @@ final class MeetingViewModel: ObservableObject {
                     lastRender = Date()
                     self.updateTurn(turnID) { $0.hint = text }
                 }
+                // The superseding request already reset this turn and owns the banner.
+                guard !Task.isCancelled else { return }
                 self.updateTurn(turnID) { $0.hint = text }
             } catch {
-                if !Task.isCancelled {
-                    self.updateTurn(turnID) { $0.hint = "Reply hint failed: \(error.localizedDescription)" }
+                guard !Task.isCancelled else { return }
+                self.updateTurn(turnID) { $0.hint = "Reply hint failed: \(error.localizedDescription)" }
+                // A missing key or a dead network would fail every paragraph.
+                if self.isFollowingUp {
+                    self.isFollowingUp = false
+                    print("[MeetingViewModel] follow-up end reason=error")
                 }
             }
             self.updateTurn(turnID) { $0.isHintStreaming = false }
+            self.hintTurnID = nil
             self.clearCallAlert()
         }
     }

@@ -88,7 +88,7 @@ enum MeetingPrompts {
         - The user was addressed earlier and the exchange may still be going on. Lines after the user's last reply are new; respond to the newest lines from the other side.
         - A new question: answer it as usual. An instruction or request (please do X, check Y): confirm it back briefly and, if something needed is missing (deadline, scope, owner), ask about it. An explanation aimed at the user: a short natural reaction that shows understanding or asks one useful question, never a long speech.
         - 对方在问 then says what the other side just said or wants, e.g. 对方让你整理 API 规格 / 对方在解释原因，不需要表态.
-        - If the newest lines are aimed at someone else (another person's name, 〜さんはどうですか to someone else) or need nothing from the user, say so in 对方在问 in a few words, skip 要点, and write （无需回应） under 可以这样说. The user ends follow-ups themselves.
+        - If the newest lines are aimed at someone else (another person's name, 〜さんはどうですか to someone else) or need nothing from the user, say so in 对方在问 in a few words, skip 要点, and write （无需回应） under 可以这样说.
 
         Example of the register for 可以这样说 (Japanese):
         - Stiff, do not write like this: 本件につきましては、バックエンド側の対応状況を確認の上、改めてご連絡させていただきたく存じます。
@@ -110,7 +110,7 @@ enum MeetingPrompts {
             lines.append("The user is addressed as: \(name)")
         }
         if isFollowUp {
-            lines.append("This is a follow-up request: the user was addressed earlier; coach on the newest lines from the other side.")
+            lines.append("This is a follow-up request: the user was addressed or asked for a hint earlier; coach on the newest lines from the other side.")
             lines.append("Recent transcript (oldest first; [Me] marks the user's own words):")
         } else {
             lines.append("Recent transcript (oldest first; [Me] marks the user's own words; the user was addressed near the end):")
