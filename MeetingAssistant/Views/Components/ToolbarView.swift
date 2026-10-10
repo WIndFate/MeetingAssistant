@@ -48,10 +48,12 @@ struct ToolbarView: View {
             )
 
             ToolbarIconButton(
-                systemImage: "text.bubble",
-                isHighlighted: false,
-                help: "Reply hint now (⌘⇧Return)",
-                action: viewModel.requestHintNow
+                systemImage: viewModel.isFollowingUp ? "text.bubble.fill" : "text.bubble",
+                isHighlighted: viewModel.isFollowingUp,
+                help: viewModel.isFollowingUp
+                    ? "Following the conversation with reply hints. Click to stop."
+                    : "Reply hint now, then keep following the conversation (⌘⇧Return)",
+                action: viewModel.toggleFollowUp
             )
 
             ToolbarIconButton(

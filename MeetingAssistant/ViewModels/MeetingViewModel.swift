@@ -24,6 +24,11 @@ final class MeetingViewModel: ObservableObject {
     @Published var isStealthEnabled = true
     /// Also transcribe the user's microphone. Off on every launch.
     @Published private(set) var isMicEnabled = false
+    // Set by a name call or a manual hint: every later paragraph from the
+    // other side gets a hint until the hint says the exchange moved on, the
+    // user stops it, or the window runs out.
+    @Published private(set) var followUpSince: Date?
+    var isFollowingUp: Bool { followUpSince != nil }
 
     let live = LiveTranscript()
     let settings: SettingsViewModel
@@ -37,9 +42,6 @@ final class MeetingViewModel: ObservableObject {
     private var hintTask: Task<Void, Never>?
     // Turns at or below this index have been answered by a hint.
     private var handledCallThroughIndex = -1
-    // Set by a name call: every later paragraph from the other side gets a
-    // hint until the hint says the exchange moved on, or the window runs out.
-    private var followUpSince: Date?
     private var callCheckTask: Task<Void, Never>?
     private var shortCallGraceIndex: Int?
     private var callAlertTask: Task<Void, Never>?
@@ -68,8 +70,9 @@ final class MeetingViewModel: ObservableObject {
     private let shortCallParagraphLength = 10
     private let shortCallGraceDelay: Duration = .milliseconds(1500)
     // Each follow-up is a full hint request; if the model never says the
-    // exchange moved on, follow-ups stop this long after the name call.
-    // ponytail: fixed window since the last name call; a fresh call restarts it.
+    // exchange moved on, follow-ups stop this long after the name call or
+    // manual hint that started them.
+    // ponytail: fixed window since the last call; a fresh call restarts it.
     private let followUpWindow: TimeInterval = 300
     // Saves are throttled, not debounced: a busy meeting streams changes
     // continuously, so a debounce could postpone the write indefinitely.
@@ -178,6 +181,17 @@ final class MeetingViewModel: ObservableObject {
             }
             requestHint(reason: "manual")
         }
+    }
+
+    /// Toolbar hint button: while following up it ends the follow-up (for
+    /// when the model misses that the talk moved on), otherwise hint now.
+    func toggleFollowUp() {
+        guard isFollowingUp else {
+            requestHintNow()
+            return
+        }
+        followUpSince = nil
+        print("[MeetingViewModel] follow-up end reason=user")
     }
 
     var transcriptText: String {
@@ -397,8 +411,8 @@ final class MeetingViewModel: ObservableObject {
         cancelShortCallGrace()
         guard !turns.isEmpty else { return }
         handledCallThroughIndex = turns.count - 1
-        if reason == "name_call" { followUpSince = Date() }
         let isFollowUp = reason == "follow_up"
+        if !isFollowUp { followUpSince = Date() }
 
         let transcript = MeetingPrompts.hintTranscript(
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
