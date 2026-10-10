@@ -25,9 +25,8 @@ final class MeetingViewModel: ObservableObject {
     /// Also transcribe the user's microphone. Off on every launch.
     @Published private(set) var isMicEnabled = false
     // Set by a name call or a manual hint: every later paragraph from the
-    // other side gets a hint until the user stops it or the window runs out.
-    @Published private(set) var followUpSince: Date?
-    var isFollowingUp: Bool { followUpSince != nil }
+    // other side gets a hint until the user stops it (or stops listening).
+    @Published private(set) var isFollowingUp = false
 
     let live = LiveTranscript()
     let settings: SettingsViewModel
@@ -68,11 +67,6 @@ final class MeetingViewModel: ObservableObject {
     // before the actual question; give the rest a moment to arrive.
     private let shortCallParagraphLength = 10
     private let shortCallGraceDelay: Duration = .milliseconds(1500)
-    // Each follow-up is a full hint request; if the user forgets to stop,
-    // follow-ups end this long after the name call or manual hint that
-    // started them.
-    // ponytail: fixed window since the last call; a fresh call restarts it.
-    private let followUpWindow: TimeInterval = 300
     // Saves are throttled, not debounced: a busy meeting streams changes
     // continuously, so a debounce could postpone the write indefinitely.
     // At most this much is lost if the app crashes.
@@ -159,7 +153,7 @@ final class MeetingViewModel: ObservableObject {
         hintTask?.cancel()
         hintTask = nil
         handledCallThroughIndex = -1
-        followUpSince = nil
+        isFollowingUp = false
         cancelShortCallGrace()
         clearCallAlert()
         turns = []
@@ -189,7 +183,7 @@ final class MeetingViewModel: ObservableObject {
             requestHintNow()
             return
         }
-        followUpSince = nil
+        isFollowingUp = false
         print("[MeetingViewModel] follow-up end reason=user")
     }
 
@@ -224,7 +218,7 @@ final class MeetingViewModel: ObservableObject {
             // Also when the system side fails: the mic follows listening.
             if !state.isListening {
                 myTranscription.stop()
-                followUpSince = nil
+                isFollowingUp = false
             }
         }
         if statusText != state.statusText { statusText = state.statusText }
@@ -370,14 +364,10 @@ final class MeetingViewModel: ObservableObject {
         let firstUnhandled = handledCallThroughIndex + 1
         guard firstUnhandled < turns.count else { return }
         let unhandled = firstUnhandled..<turns.count
-        if let since = followUpSince, Date().timeIntervalSince(since) > followUpWindow {
-            followUpSince = nil
-            print("[MeetingViewModel] follow-up end reason=window")
-        }
         let callIndex = unhandled.last(where: {
             !turns[$0].isMine && MeetingCallDetector.containsCall(turns[$0].text, aliases: settings.aliases)
         })
-        let needsFollowUp = followUpSince != nil && unhandled.contains(where: { !turns[$0].isMine })
+        let needsFollowUp = isFollowingUp && unhandled.contains(where: { !turns[$0].isMine })
         guard callIndex != nil || needsFollowUp else { return }
         // Still talking: the question is not finished yet.
         guard transcription.state.partialTranscript.count < 2 else { return }
@@ -411,7 +401,7 @@ final class MeetingViewModel: ObservableObject {
         guard !turns.isEmpty else { return }
         handledCallThroughIndex = turns.count - 1
         let isFollowUp = reason == "follow_up"
-        if !isFollowUp { followUpSince = Date() }
+        if !isFollowUp { isFollowingUp = true }
 
         let transcript = MeetingPrompts.hintTranscript(
             turns.map { MeetingPrompts.hintLine($0.text, isMine: $0.isMine) },
